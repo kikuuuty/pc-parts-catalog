@@ -82,4 +82,16 @@ NULLを0として検索すると「PSU長上限0mm」等の誤った互換性判
 CPUの既知family分類は452/789件。Xeon、Threadripper等の未対応分類はraw/series/nameを保持してfamilyはNULL。
 互換性に使う際は上流の情報充足率と原データも確認する。
 
+## Phase 1検索改善後の検証
+
+`0004_search_relevance.sql`適用後は従来12件＋exact/compact/short-token/fallback/keyword identifierの5件、
+**17件すべて成功**。keyword経路はFTS候補IDを起点にproducts/specを主キーで引き、
+全products/spec走査があれば`verify:plans`を失敗させる。
+既存のkeyword＋GPU filtersはrelevance評価のためrows_readが222 → 650、
+他のkeywordなし代表条件は従来のINDEXと読取量を維持した。
+FTS列の拡張によりDBサイズは138,330,112 bytesになった。
+
+計画・時間・読取量・migrationの比較は[Phase 1測定結果](search-quality-phase1.md)、
+CROSS JOINによる候補起点制御と100 bindの維持方法は[検索仕様](search-relevance.md)を参照。
+
 上流の出典とODC-By 1.0通知は [NOTICE.md](../NOTICE.md) を参照。

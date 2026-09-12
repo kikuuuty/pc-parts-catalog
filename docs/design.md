@@ -56,7 +56,8 @@
   将来のAPIが採用する優先順位を明示的に決めるため、現段階では上流検索列へ自動上書きしない。
 - `upstream_raw`: 元のJSON全体を補助保存。複雑なコネクタ/ポート/販売店mappingも失わない。
 - FTS5: 製品のmanufacturer/name/series/variant、CPU分類/GPUチップ名、上流identifierを索引化。
-  local identifierも独立FTSへtriggerで反映。token前方一致AND検索で、検索時の製品名解析は不要。
+  local identifierも独立FTSへtriggerで反映。Phase 1ではフィールド別FTS、型番表記のquery展開、
+  exact boost＋bm25、strict 0件時の限定fallbackを導入。詳細は[検索仕様](search-relevance.md)。
 
 ### 主な列と変換
 

@@ -110,7 +110,7 @@ async function main() {
       const query = searchQuery(args.category ?? config.category, {
         keyword: args.keyword ?? config.keyword, filters: args.filters ? JSON.parse(args.filters) : config.filters, ranges: args.ranges ? JSON.parse(args.ranges) : config.ranges, facets: args.facets ? JSON.parse(args.facets) : config.facets,
         identifier: args.identifier ? { value: args.identifier, type: args['identifier-type'] } : config.identifier,
-        limit: positiveInteger(args.limit, config.limit ?? 20), orderBy: args.order ?? config.orderBy,
+        limit: positiveInteger(args.limit, config.limit ?? 20), orderBy: args.order ?? config.orderBy, debug: args.verbose ?? config.debug,
       });
       print(await db.query(args.explain ? `EXPLAIN QUERY PLAN ${query.sql}` : query.sql, query.params));
     } else if (command === 'plans') {

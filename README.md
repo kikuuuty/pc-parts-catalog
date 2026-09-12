@@ -87,11 +87,31 @@ npm run search -- --category psu --keyword RM1000x
 npm run search -- --category cpu --identifier-type mpn --identifier BX80768285K
 ```
 
-キーワードはFTS5の**単語前方一致・AND検索**です。`RTX 5080` は `"RTX"* AND "5080"*`。
+キーワードはFTS5の**AND検索を基本としたrelevance順**です。
+NFKC正規化を維持し、`990pro` / `990 pro`、`rtx5080` / `rtx 5080`、`sn850x` / `sn 850x` 等は、
+型番らしい英数字に限定して検索時に表記を展開します。一般の自然言語の空白は除去しません。
 manufacturer/name/series/variant、CPU分類・GPUチップ名、上流identifierを検索します。
 独自identifierにも別のFTSがあり、追加直後からidentifier単体のキーワード検索が可能です。
 全文書の任意位置に対する部分文字列検索や、日本語形態素解析は行いません。
 local identifierの語と製品名の語を跨ぐ複数語検索は、別FTS文書のため一致しません。
+
+製品名の完全一致・型番/phraseの完全なtoken一致・フィールド別の一致を優先し、
+column-weight付き`bm25()`と製品IDで順位を安定化します。`14900K`は`14900KF/KS`より上位になります。
+identifierの強いboostは形状と共有製品数の条件を満たす場合だけです。`OC`、`16`等は最優先にしません。
+`7`等の1桁数字は前方一致ではなく単語一致です。
+strict結果が**0件の場合だけ**、十分な残り語と型番があれば、モデル数字に隣接しない孤立した1文字英字を
+1つ落としてAND検索します（例: `gaming x trio 5080`）。既存strict結果にfallbackを混ぜません。
+
+```sh
+# 既存DBも検索専用FTSを保存済みデータから再構築。upstream再取得・再同期は不要。
+npm run db:migrate
+npm run search -- --category cpu --keyword 14900k --verbose
+npm run search -- --category gpu --keyword "gaming x trio 5080" --verbose
+```
+
+`--verbose`（内部オプション`debug: true`）で`search_score`、`search_match`、`search_fts_relevance`を表示します。
+詳細な条件・ランキング・制限は [検索仕様](docs/search-relevance.md)、同じGolden Queryでの比較は
+[Phase 1測定結果](docs/search-quality-phase1.md) を参照してください。
 
 完全一致検索は `identifierKey()` によるNFKC・前後trim・ASCII大文字化を使用します。
 **先頭0、ハイフン、内部空白を保持**し、EAN/UPCを数値へ変換しません。
@@ -139,6 +159,7 @@ npm run search -- --query-file examples/gpu-search.json --explain
 - XMP/EXPOは `xmp: [1]` / `expo: [1]`。空の上流タグ配列は0、省略/nullはNULL。
   0は「タグの報告なし」であり、独自検証済みの非対応判定ではありません。
 - `orderBy` は許可済みの列のみ、limitは1～100。末尾に製品IDを付けた安定順です。
+  キーワード指定時の既定はrelevance順ですが、明示した`orderBy` / `--order`はその列の昇順を優先します。
 - Bashでは `--filters '{"socket":["AM5"]}'`、`--ranges '{"tdp_w":{"min":65,"max":125}}'` の直接指定も可能です。
 
 主要レンジ検索列:
@@ -351,6 +372,8 @@ npm run stats
 `npm run schema:check` が定義との一致を検証します。将来の変更は既存migrationを書き換えず、
 新しいmigrationを追加してください。正規化規則変更時は `NORMALIZER_VERSION` を上げて再同期します。
 現在の初期INDEXからの実測に基づく調整は `0003_query_plan_tuning.sql` にあります。
+`0004_search_relevance.sql`は検索専用FTS列の追加と既存DBの再構築です。
+カタログ正規化規則の変更ではないため、`NORMALIZER_VERSION`は1のままで再同期も不要です。
 
 ## Catalog quality audit
 

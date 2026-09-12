@@ -218,7 +218,7 @@ test('query builder rejects SQL/FTS injection and invalid ranges/parameters', ()
   assert.throws(() => searchQuery('cpu', { ranges: { core_count: { min: null } } }), /Invalid range/);
   assert.throws(() => searchQuery('cpu', { filters: { core_count: '8' } }), /Invalid value/);
   assert.throws(() => keywordExpression('***'), /tokens/);
-  assert.equal(keywordExpression('RTX " OR 5080'), '"RTX"* AND "OR"* AND "5080"*');
+  assert.equal(keywordExpression('RTX " OR word'), '"RTX"* AND "OR"* AND "word"*');
   const q = searchQuery('cpu', { filters: { manufacturer: "x' OR 1=1 --" } });
   assert(!q.sql.includes('OR 1=1'));
   assert(q.params.includes("x' OR 1=1 --"));
