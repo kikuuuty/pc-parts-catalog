@@ -1,8 +1,12 @@
-# Phase 1: FTS5による検索relevance
+# FTS5による検索relevance
 
 検索の入口は従来と同じ`src/queries.js`の`searchQuery(category, options)`。
 CLI・benchmark・呼び出し側のD1 bindingは、この関数のSQLとparamsをそのまま実行する。
 fallbackも1つのSQL内で処理し、benchmark用の別ランキングは持たない。
+
+以下はPhase 1の共通基盤。Phase 2ではcategory-awareなunit/spec解釈、family/chipset一致、
+CPU family限定の弱いfreshnessを追加した。候補取得の上限やNULLの扱いを含む現在の追加仕様は
+[search-phase2.md](search-phase2.md)を参照。モデル/identifierの元データ正規化は変更していない。
 
 ## Query normalization
 
@@ -29,7 +33,8 @@ fallbackも1つのSQL内で処理し、benchmark用の別ランキングは持�
 `family`には既存CPU family/generationとGPU chipset/chip_seriesを投影する。
 `text`は従来の検索文書（上流identifierを含む）と取込契約を維持する。
 
-概ね次の順に一致のtierを評価する。
+Phase 1の一致tierは以下。Phase 2では名称全体と名称phraseの間に、明確なfamily/chipset一致を追加する。
+各tierを逆転させない範囲でspec/manufacturer/freshnessのsignalも評価する。
 
 1. 条件を満たすidentifierの完全一致。
 2. 名称全体の一致（queryはNFKC/trim/lower、保存名はSQLiteのlower/trimで比較）。
@@ -130,4 +135,5 @@ legacy textのINSERT後にフィールドUPDATEが加わるため、変更製品
 typo訂正、fuzzy/semantic検索、一般の同義語、任意の省略語、メーカーやSKUの品質修正は含まない。
 元のMPNやvariantの誤りは残り、低順位の候補やBM25に影響する場合がある。
 広い検索は検索語の一致を評価するため、最新世代・人気・容量・OC優先などの意図は推測しない。
-性能とGolden Queryでの実測は[Phase 1測定結果](search-quality-phase1.md)を参照。
+Phase 1の実測は[Phase 1測定結果](search-quality-phase1.md)、現在の120件評価は
+[Phase 2測定結果](search-quality-phase2.md)を参照。

@@ -15,6 +15,17 @@ member determines rank. Each single selector must resolve to at most one product
 Do not silently relax an ambiguous MPN/name expectation; review the conflicting
 records and use explicit stable IDs. See README.md for fixture syntax and metrics.
 
+Phase 2 keeps this legacy file byte-identical. `search-regression-labels.json` adds
+class/precision metadata without overriding queries or expectations.
+`search-phase2.json` contains 80 catalog-grounded additions: 52 development and 28
+holdout cases, frozen before search implementation changes. The default benchmark
+loads all 120 cases; `--suite` and `--class` select evaluations.
+Explicit `{ "set": { "fields": { "spec.family": "Ryzen 7" } } }` selectors resolve
+groups using evaluation-only typed predicates. An optional `acceptable` selector
+defines Precision@5/10 with a fixed K denominator (missing slots count as nonrelevant).
+See [the evaluation contract](../../docs/search-evaluation-phase2.md) for evidence,
+scope, classes, limitations, and fixture hashes.
+
 Contains information from [BuildCores OpenDB](https://github.com/buildcores/buildcores-open-db),
 which is made available under the [ODC Attribution License](https://opendatacommons.org/licenses/by/1-0/).
 Preserve [NOTICE.md](../../NOTICE.md) with this fixture when redistributing it.

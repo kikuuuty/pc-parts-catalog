@@ -113,6 +113,12 @@ npm run search -- --category gpu --keyword "gaming x trio 5080" --verbose
 詳細な条件・ランキング・制限は [検索仕様](docs/search-relevance.md)、同じGolden Queryでの比較は
 [Phase 1測定結果](docs/search-quality-phase1.md) を参照してください。
 
+Phase 2では`990 pro 2tb`、`ddr5 6000 cl30 32gb`、`850w gold`、`360mm aio`等の明確なspecを
+カテゴリ別に解釈し、モデル一致を保ちながらtyped specで加点します。
+Motherboard chipsetとCPU familyの一致も強化し、CPU family検索内だけで弱いrelease_year調整を行います。
+NULLを古い製品とは扱いません。INDEX起点の補助候補はscope適用後の最大256件です。
+詳細は[Phase 2検索仕様](docs/search-phase2.md)、[120件の比較結果](docs/search-quality-phase2.md)を参照してください。
+
 完全一致検索は `identifierKey()` によるNFKC・前後trim・ASCII大文字化を使用します。
 **先頭0、ハイフン、内部空白を保持**し、EAN/UPCを数値へ変換しません。
 `--identifier-type` を省略すると種別を跨いで検索します。JANは `jan` を指定できます。
@@ -374,6 +380,7 @@ npm run stats
 現在の初期INDEXからの実測に基づく調整は `0003_query_plan_tuning.sql` にあります。
 `0004_search_relevance.sql`は検索専用FTS列の追加と既存DBの再構築です。
 カタログ正規化規則の変更ではないため、`NORMALIZER_VERSION`は1のままで再同期も不要です。
+`0005_spec_search_indexes.sql`はPhase 2のspec/chipset検索用INDEX追加です。FTS再構築や再同期は不要です。
 
 ## Catalog quality audit
 
@@ -448,7 +455,20 @@ npm run benchmark:search -- --category cpu --verbose
 npm run benchmark:search -- --fixture test/fixtures/search-benchmark.json
 ```
 
-Golden Queryは `test/fixtures/search-benchmark.json` の40ケースです。
+既存Golden Queryは `test/fixtures/search-benchmark.json` の40ケースで、回帰suiteとして内容を固定しています。
+既定のbenchmarkは追加の `search-phase2.json` 80件とラベルmetadataを読み、**120ケース**を評価します。
+構成はregression 40 / development 52 / holdout 28。class別・suite別のHit/MRRと、
+許容集合を明示した44件のPrecision@5/10も出力します。
+評価定義・DB根拠・集合selectorの仕様は[Phase 2評価契約](docs/search-evaluation-phase2.md)を参照してください。
+
+```sh
+npm run benchmark:search -- --suite regression
+npm run benchmark:search -- --suite development
+npm run benchmark:search -- --suite holdout
+npm run benchmark:search -- --class broad --summary-only
+```
+
+`--fixture test/fixtures/search-benchmark.json`なら従来40件だけをそのまま評価できます。
 実DBで製品とidentifierを確認し、期待値を検索結果の順位から自動生成しない方針で作成しました。
 広いシリーズ検索では、確認した許容製品のID集合のどれかが最初に出た順位を評価します。
 名前完全一致だけへの依存を避け、ID、identifier、MPN、名称条件に対応します。
@@ -501,7 +521,10 @@ npmのバナーを抑えて機械処理する場合は上記の `--silent` を�
 ベンチマークの `results` / `by_category` に格納します。出典とODC-By通知も `catalog.sources` に含めます。
 
 `catalog_sha256` は監査で読んだ製品行（内部ID・同期情報を含む）・型付きスペック・identifierの指紋です。
-ベンチマークはfixtureファイルと `src/queries.js` のSHA-256、実行SQL/paramsも保存します。
+ベンチマークはfixtureと検索実装のSHA-256、実行SQL/paramsも保存します。
+Phase 2の既定fixture hashは元の40件・ラベル・追加80件の各原文を配列にしたJSONのSHA-256、
+実装hashは`src/queries.js`と`src/search-intent.js`の原文配列JSONのSHA-256です。
+`--fixture`指定時は指定ファイル原文のSHA-256を使います。
 同じ上流commitでも独自identifierや内部IDが違えば、別の測定対象として区別できます。
 raw JSONの直接比較・外部公式サイトとの照合はこの監査に含めません。
 
@@ -544,7 +567,7 @@ rootに `search` を追加すると、既存検索の `filters` / `ranges` / `fa
 
 オフラインの `npm test` は小さな合成DBで監査・指標・125位の検出・原因分類を検証します。
 GitHub CIでは既存の実データ取込後に3つの監査を実行し、JSONをartifactに保存します。
-40ケースは代表的なモデル検索のbaselineで、全カテゴリ・全製品の検索適合率を保証するものではありません。
+120ケースは全9カテゴリの代表的な検索意図を評価しますが、全製品の適合率や最新構成としての推奨度を保証するものではありません。
 
 ## ライセンス・Attribution
 

@@ -1,5 +1,6 @@
 import { models } from './model.js';
 import { identifierKey } from './normalize.js';
+import { parseSearchIntent, specSeed } from './search-intent.js';
 
 const common = { manufacturer: 'TEXT', series: 'TEXT', variant: 'TEXT', release_year: 'INTEGER' };
 function keywordTokens(value) {
@@ -136,7 +137,18 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   let diagnostics = '';
   let predicates = where.join(' AND ');
   if (keyword !== undefined) {
-    const terms = searchTerms(keyword);
+    keywordTokens(keyword); // Validate the original input before consuming semantic tokens.
+    const intent = parseSearchIntent(category,keyword);
+    const seed=specSeed(category,intent.specs);
+    // A manufacturer/family word plus several specs can otherwise expand to
+    // thousands of brand-only hits. Keep literal recall, adding a bounded indexed
+    // spec+lexical path instead. Digit-bearing model anchors remain unrestricted.
+    const boundedLexical = !intent.specOnly && !intent.identity && intent.specs.length>=2 && !/\d/.test(intent.remaining) && seed;
+    const terms = {...searchTerms(intent.keyword),intent,name:keyword.normalize('NFKC').trim().toLowerCase()};
+    if (boundedLexical) terms.literalPrefix=keywordExpression(intent.literal);
+    // Exact identifiers always use the unconsumed input and Phase 1 trust rules.
+    terms.identifierKind = searchTerms(keyword).identifierKind;
+    if (intent.identity?.residual) terms.identityResidual = keywordExpression(intent.identity.residual);
     // Two binds regardless of token/fallback count. Numbered references let strict
     // and fallback share all filters without duplicating the 100-bind budget.
     let n = 0;
@@ -146,14 +158,31 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     params.push(JSON.stringify(terms), identifierKey(keyword));
     const value = path => `(SELECT json_extract(q,'$.${path}') FROM search_input)`;
     const fts = (mode, guard = '') => `SELECT rowid AS id,-bm25(product_fts,0.1,10,2,4,3,4) AS relevance
-        FROM product_fts WHERE ${guard}product_fts MATCH ${value(`${mode}.prefix`)}
+        FROM product_fts WHERE ${guard}product_fts MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}
       UNION ALL SELECT i.product_id,0 FROM local_identifier_fts JOIN local_identifiers i ON i.id=local_identifier_fts.rowid
-        WHERE ${guard}local_identifier_fts MATCH ${value(`${mode}.prefix`)}`;
+        WHERE ${guard}local_identifier_fts MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}`;
     const candidates = (hits, mode) => `SELECT h.id,max(h.relevance) AS relevance,${mode} AS fallback
       FROM ${hits} h CROSS JOIN products p ON p.id=h.id CROSS JOIN ${model.table} s ON s.product_id=p.id
       WHERE ${scoped} GROUP BY h.id`;
     const matches = field => `p.id IN (SELECT rowid FROM product_fts WHERE product_fts MATCH
       ${terms.fallback ? `CASE WHEN NOT EXISTS (SELECT 1 FROM strict) THEN ${value(`fallback.${field}`)} ELSE ${value(`strict.${field}`)} END` : value(`strict.${field}`)})`;
+    const specConditions = intent.specs.map((spec,i) => `s.${spec.field}=${value(`intent.specs[${i}].value`)}`);
+    const identityCondition = intent.identity ? `s.chipset IN (SELECT value FROM json_each(${value('intent.identity.values')}))` : '0';
+    const familyCondition = intent.family ? `s.family=${value('intent.family')}` : '0';
+    const typed = intent.identity ? `UNION ALL SELECT s.product_id,0 FROM ${model.table} s WHERE ${identityCondition}
+        ${intent.identity.residual ? `AND EXISTS (SELECT 1 FROM product_fts WHERE rowid=s.product_id AND product_fts MATCH ${value('identityResidual')})` : ''}`
+      : (intent.specOnly || boundedLexical) && seed ? `UNION ALL SELECT id,0 FROM (
+          SELECT s.product_id AS id FROM ${model.table} s CROSS JOIN products p ON p.id=s.product_id
+          WHERE ${specConditions.join(' AND ')} AND ${scoped}
+          ${boundedLexical ? `AND s.product_id IN (SELECT rowid FROM product_fts WHERE product_fts MATCH ${value('strict.prefix')})` : ''}
+          ORDER BY ${seed.order.map(field=>`s.${field}`).join(',')} LIMIT 256
+        )` : '';
+    const specScore = intent.specs.length ? `(${specConditions.map((condition,i) => `CASE WHEN ${condition} THEN 1.0 WHEN s.${intent.specs[i].field} IS NULL THEN 0.25 ELSE 0 END`).join('+')}) * ${12/intent.specs.length}` : '0';
+    const manufacturer = "lower(trim(replace(replace(coalesce(p.manufacturer,''),'.',' '),'!','')))";
+    const manufacturerScore = `CASE WHEN length(${manufacturer})>0 AND instr(' '||${value('intent.remaining')}||' ',' '||${manufacturer}||' ')>0 THEN 2 ELSE 0 END`;
+    // NULL is neutral, not an old year. A fixed reference makes same-DB ordering
+    // independent of wall-clock time. Only recognized CPU family queries opt in.
+    const freshness = intent.family ? `CASE WHEN ${familyCondition} AND p.release_year IS NOT NULL THEN max(-0.05,min(0.05,(p.release_year-2022)*0.01)) ELSE 0 END` : '0';
     withSQL = `WITH search_input AS (SELECT ${input} AS q),
       exact_identifiers AS MATERIALIZED (
         SELECT DISTINCT product_id FROM identifiers WHERE value_key=${key} AND
@@ -162,7 +191,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
       ),
       trusted_identifiers AS (SELECT product_id FROM exact_identifiers WHERE (SELECT count(*) FROM exact_identifiers)<=3),
       strict_fts AS MATERIALIZED (${fts('strict')}
-        UNION ALL SELECT product_id,0 FROM trusted_identifiers),
+        UNION ALL SELECT product_id,0 FROM trusted_identifiers ${typed}),
       strict AS MATERIALIZED (${candidates('strict_fts',0)}),
       ${terms.fallback ? `fallback_fts AS MATERIALIZED (${fts('fallback','NOT EXISTS (SELECT 1 FROM strict) AND ')}),
       candidates AS (${candidates('fallback_fts',1)} UNION ALL SELECT * FROM strict),` : 'candidates AS (SELECT * FROM strict),'}
@@ -170,18 +199,22 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
         SELECT c.*, CASE
           WHEN c.fallback=0 AND p.id IN (SELECT product_id FROM trusted_identifiers) THEN 800
           WHEN lower(trim(p.name))=${value('name')} THEN 700
+          ${intent.specOnly ? 'ELSE 600' : `WHEN ${identityCondition} OR ${familyCondition} THEN 675
+          ${intent.specs.length ? `WHEN ${manufacturer}=${value('intent.remaining')} THEN 650` : ''}
           WHEN ${matches('namePhrase')} THEN 650
           WHEN ${matches('nameExact')} THEN 600
           WHEN ${matches('modelExact')} THEN 500
           WHEN ${matches('namePrefix')} THEN 400
           WHEN ${matches('familyExact')} THEN 300
           WHEN ${matches('fieldsExact')} THEN 200
-          ELSE 100 END AS tier
+          ELSE 100`} END AS tier,
+          ${specScore} AS spec_score,${manufacturerScore} AS manufacturer_score,${freshness} AS freshness_score
         FROM candidates c CROSS JOIN products p ON p.id=c.id
+        ${intent.specs.length || intent.identity || intent.family ? `CROSS JOIN ${model.table} s ON s.product_id=p.id` : ''}
       ), scored AS (
-        SELECT *,tier + relevance/(1+relevance) - fallback*1000 AS score,
-          CASE WHEN fallback=1 THEN 'fallback' ELSE CASE tier
-            WHEN 800 THEN 'exact-identifier' WHEN 700 THEN 'exact-name'
+        SELECT *,tier + spec_score + manufacturer_score + freshness_score + relevance/(1+relevance) - fallback*1000 AS score,
+          CASE WHEN fallback=1 THEN 'fallback' ${intent.specOnly ? "WHEN tier<700 THEN 'spec-intent'" : ''} ELSE CASE tier
+            WHEN 800 THEN 'exact-identifier' WHEN 700 THEN 'exact-name' WHEN 675 THEN 'family-chipset'
             WHEN 650 THEN 'name-phrase' WHEN 600 THEN 'exact-name-tokens' WHEN 500 THEN 'exact-model'
             WHEN 400 THEN 'prefix-name' WHEN 300 THEN 'series-variant'
             WHEN 200 THEN 'field-tokens' ELSE 'fts' END END AS match_type FROM ranked
@@ -190,7 +223,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     // SQLite otherwise sometimes scans the entire catalog to build an automatic join index.
     from = `scored r CROSS JOIN products p ON p.id=r.id CROSS JOIN ${model.table} s ON s.product_id=p.id`;
     predicates = '1=1'; // Scope was applied before the strict-empty/fallback decision.
-    if (debug) diagnostics = ',r.score AS search_score,r.match_type AS search_match,r.relevance AS search_fts_relevance';
+    if (debug) diagnostics = ',r.score AS search_score,r.match_type AS search_match,r.relevance AS search_fts_relevance,r.tier AS model_score,r.spec_score,r.manufacturer_score,r.freshness_score,r.fallback AS search_fallback';
   }
   const order = orderBy ? `${column(orderBy)},s.product_id` : keyword === undefined ? 'p.id' : 'r.score DESC,p.id';
   params.push(limit);
@@ -219,6 +252,17 @@ export const representativeQueries = [
   { name: '15 Short family token', category: 'cpu', options: { keyword: 'ryzen 7' }, indexes: ['VIRTUAL TABLE INDEX'] },
   { name: '16 Controlled fallback', category: 'gpu', options: { keyword: 'gaming x trio 5080' }, indexes: ['VIRTUAL TABLE INDEX'] },
   { name: '17 Keyword identifier boost', category: 'cpu', options: { keyword: 'BX80768285K' }, indexes: ['upstream_identifier_exact','local_identifier_exact'] },
+  { name: '18 Memory combined specifications', category: 'memory', options: { keyword:'ddr5 6000 cl30 32gb' }, indexes:['memory_search_speed'] },
+  { name: '19 Memory transfer rate', category: 'memory', options: { keyword:'6000mt/s' }, indexes:['memory_search_speed'] },
+  { name: '20 Motherboard chipset and wifi', category: 'motherboard', options: { keyword:'b650e wifi' }, indexes:['motherboard_search_chipset'] },
+  { name: '21 Motherboard socket and form', category: 'motherboard', options: { keyword:'am5 atx' }, indexes:['motherboard_socket_memory'] },
+  { name: '22 PSU spec-only', category: 'psu', options: { keyword:'850w gold' }, indexes:['psu_wattage'] },
+  { name: '23 Cooler fan diameter', category: 'cpu_cooler', options: { keyword:'120mm air cooler' }, indexes:['cooler_search_fan'] },
+  { name: '24 Cooler radiator diameter', category: 'cpu_cooler', options: { keyword:'360mm aio' }, indexes:['cooler_radiator'] },
+  { name: '25 Case fan size PWM', category: 'case_fan', options: { keyword:'120mm pwm' }, indexes:['fan_size_airflow'] },
+  { name: '26 Storage NVMe capacity', category: 'storage', options: { keyword:'nvme 2tb' }, indexes:['storage_capacity'] },
+  { name: '27 Memory type only', category: 'memory', options: { keyword:'ddr5' }, indexes:['memory_type_speed'] },
+  { name: '28 Memory total capacity', category: 'memory', options: { keyword:'ddr5 32gb' }, indexes:['memory_search_capacity'] },
 ];
 
 export async function verifyPlans(db) {

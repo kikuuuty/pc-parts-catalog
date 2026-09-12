@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { loadQualityCatalog } from './quality/catalog.js';
 import { auditCompleteness, auditDuplicates } from './quality/audit.js';
 import { benchmarkSearch } from './quality/benchmark.js';
+import { loadSearchFixture } from './quality/fixtures.js';
 import { formatCompleteness, formatDuplicates, formatBenchmark } from './quality/format.js';
 
 const { values: args, positionals } = parseArgs({ allowPositionals: true, options: {
@@ -20,6 +21,8 @@ const { values: args, positionals } = parseArgs({ allowPositionals: true, option
   manufacturer: { type: 'string' }, field: { type: 'string' }, 'by-manufacturer': { type: 'boolean' },
   'year-from': { type: 'string' }, 'year-to': { type: 'string' }, 'unknown-year': { type: 'boolean' }, 'include-inactive': { type: 'boolean' },
   json: { type: 'boolean' }, verbose: { type: 'boolean' }, output: { type: 'string' }, fixture: { type: 'string' },
+  suite: { type:'string' }, class: { type:'string' },
+  'summary-only': { type:'boolean' },
 } });
 const [command] = positionals;
 const print = object => console.log(JSON.stringify(object, null, 2));
@@ -53,14 +56,14 @@ async function main() {
         report = auditDuplicates(catalog, options);
         format = value => formatDuplicates(value, { verbose: args.verbose, limit: positiveInteger(args.limit, 10) });
       } else {
-        const input = await readFile(args.fixture ?? 'test/fixtures/search-benchmark.json', 'utf8');
-        const implementation = await readFile(new URL('./queries.js', import.meta.url));
-        report = await benchmarkSearch(db, catalog, JSON.parse(input), {
-          category: args.category,
-          fixtureHash: createHash('sha256').update(input).digest('hex'),
-          searchImplementationHash: createHash('sha256').update(implementation).digest('hex'),
+        const input = await loadSearchFixture(args.fixture);
+        const implementation = await Promise.all(['queries.js','search-intent.js'].map(file => readFile(new URL(file, import.meta.url),'utf8')));
+        report = await benchmarkSearch(db, catalog, input.fixture, {
+          category: args.category, suite:args.suite, queryClass:args.class,
+          fixtureHash: input.hash,
+          searchImplementationHash: createHash('sha256').update(JSON.stringify(implementation)).digest('hex'),
         });
-        format = value => formatBenchmark(value, { verbose: args.verbose });
+        format = value => formatBenchmark(value, { verbose: args.verbose, summaryOnly:args['summary-only'] });
       }
       if (args.output) await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
       if (args.json) print(report);
@@ -116,7 +119,7 @@ async function main() {
     } else if (command === 'plans') {
       const reports = await verifyPlans(db);
       await writeFile('.cache/query-plans.json', JSON.stringify(reports, null, 2));
-      print(reports.map(r => ({ name: r.name, passed: r.index_check, returned: r.returned, plan: r.plan })));
+      print(reports.map(r => ({ name: r.name, passed: r.index_check, returned: r.returned, ...(args['summary-only'] ? {rows_read:r.meta?.rows_read,catalog_full_scan:r.catalog_full_scan} : {plan:r.plan}) })));
       if (reports.some(r => !r.index_check)) throw new Error('Expected index missing; inspect .cache/query-plans.json');
     } else {
       const counts = await db.query('SELECT category,active,count(*) AS count FROM products GROUP BY category,active ORDER BY category,active');

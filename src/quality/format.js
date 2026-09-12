@@ -31,10 +31,15 @@ export function formatDuplicates(report, { verbose = false, limit = 10 } = {}) {
   }
   return lines.join('\n');
 }
-export function formatBenchmark(report, { verbose = false } = {}) {
+export function formatBenchmark(report, { verbose = false, summaryOnly = false } = {}) {
   const s = report.summary;
   const lines = ['Search benchmark', `Queries: ${s.query_count} (scored: ${s.scored_query_count})`, `Hit@1: ${percent(s.hit_at_1)}  Hit@5: ${percent(s.hit_at_5)}  Hit@10: ${percent(s.hit_at_10)}`, `MRR: ${s.mrr === null ? 'N/A' : s.mrr.toFixed(4)}`, `Zero results: ${s.zero_result_count}  Failed queries: ${s.failed_query_count}`, ...Object.entries(s.failures).map(([k,v]) => `${k}: ${v}`)];
   if (s.missing_expected_target_count) lines.push(`Missing expected target references (including anyOf members): ${s.missing_expected_target_count}`);
+  if (s.precision_query_count) lines.push(`Precision@5: ${percent(s.precision_at_5)}  Precision@10: ${percent(s.precision_at_10)} (${s.precision_query_count} cases; fixed K denominator)`);
+  for (const [label,groups] of [['Suite',report.by_suite],['Class',report.by_class]]) {
+    for (const [name,m] of Object.entries(groups ?? {})) lines.push(`${label} ${name}: n=${m.query_count}, Hit@1=${percent(m.hit_at_1)}, Hit@5=${percent(m.hit_at_5)}, MRR=${m.mrr?.toFixed(4) ?? 'N/A'}`);
+  }
+  if (summaryOnly) return lines.join('\n');
   for (const r of report.results) {
     if (r.status === 'HIT' && !verbose) continue;
     lines.push('', `${r.status === 'HIT' ? 'PASS' : 'FAIL'} ${r.id} [${r.status}]`, `query: ${r.query}`, `expected: ${JSON.stringify(r.expected)}`, `rank: ${r.rank ?? 'not found'}; pages: ${r.executed_pages}`, ...(r.reason ? [`reason: ${r.reason}`] : []), 'Top results:', ...r.top_results.map(p => `${p.rank}. [${p.upstream_key}] ${p.name}`));

@@ -95,3 +95,14 @@ FTS列の拡張によりDBサイズは138,330,112 bytesになった。
 CROSS JOINによる候補起点制御と100 bindの維持方法は[検索仕様](search-relevance.md)を参照。
 
 上流の出典とODC-By 1.0通知は [NOTICE.md](../NOTICE.md) を参照。
+
+## Phase 2
+
+`0005_spec_search_indexes.sql`でmemory容量/speed、motherboard chipset、cooler fan径の4 INDEXを追加。
+`verify:plans`は28件、拡張fixture＋edgeの追加測定は125件すべてでproducts/spec全走査なし。
+spec-onlyの補助経路は既存/追加INDEXの左端から取得し、scope適用後に256件へ制限する。
+複数spec＋メーカー語の照合ではFTS ID集合を一度計算して利用する。
+
+既存40件のrows_readは15,441→15,483。拡張120件は186,124→262,763。
+費用・時間・候補上限のtrade-offは[Phase 2測定結果](search-quality-phase2.md)と
+[検索仕様](search-phase2.md)を参照。

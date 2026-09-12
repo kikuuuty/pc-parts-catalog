@@ -3,6 +3,10 @@ import { categories } from '../model.js';
 import { identifierKey } from '../normalize.js';
 import { searchQuery } from '../queries.js';
 import { assertCatalogState, envelope, isMissing, manufacturerKey, nameKey, normalizedIdentifier, productSummary, validIdentifiers } from './catalog.js';
+import { selectExpectedSet } from './selection.js';
+
+export const queryClasses = ['exact_model','compact_model','family','manufacturer_model','model_spec','spec_only','identifier','broad','fallback'];
+export const querySuites = ['regression','development','holdout'];
 
 export const failureTypes = ['MISSING_PRODUCT','NO_SEARCH_MATCH','RANKING_FAILURE','EXPECTED_DATA_INVALID'];
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -39,6 +43,10 @@ export function matchesExpected(product, expected) {
 // Resolve independently of FTS so missing catalog data is not mistaken for search failure.
 export function resolveExpected(catalog, category, expected) {
   try {
+    if (object(expected) && Object.hasOwn(expected,'set')) {
+      const products = selectExpectedSet(catalog,category,expected);
+      return { status:products.length ? null : 'MISSING_PRODUCT', reason:products.length ? null : 'No product satisfies expected set', products, missing:[], ambiguous:[] };
+    }
     let selectors;
     if (object(expected) && Object.hasOwn(expected, 'upstream_ids')) {
       if (Object.keys(expected).length !== 1 || !Array.isArray(expected.upstream_ids) || !expected.upstream_ids.length || expected.upstream_ids.length > 500) throw new Error('upstream_ids needs 1–500 explicit UUIDs');
@@ -75,6 +83,7 @@ export function benchmarkMetrics(results) {
   // Missing products ARE scored as zero, measuring end-to-end catalog usefulness.
   const scored = results.filter(r => r.status !== 'EXPECTED_DATA_INVALID');
   const rate = count => scored.length ? count / scored.length : null;
+  const precision = scored.filter(r => r.precision_at_5 != null);
   return {
     query_count: results.length, scored_query_count: scored.length,
     missing_expected_target_count: results.reduce((sum,r) => sum + (r.missing_targets?.length ?? 0),0),
@@ -84,33 +93,44 @@ export function benchmarkMetrics(results) {
     hit_at_5: rate(scored.filter(r => r.rank !== null && r.rank <= 5).length),
     hit_at_10: rate(scored.filter(r => r.rank !== null && r.rank <= 10).length),
     mrr: scored.length ? scored.reduce((sum,r) => sum + (r.rank === null ? 0 : 1 / r.rank), 0) / scored.length : null,
+    precision_query_count: precision.length,
+    precision_at_5: precision.length ? precision.reduce((sum,r) => sum+r.precision_at_5,0)/precision.length : null,
+    precision_at_10: precision.length ? precision.reduce((sum,r) => sum+r.precision_at_10,0)/precision.length : null,
     failures: Object.fromEntries(failureTypes.map(type => [type, results.filter(r => r.status === type).length])),
   };
 }
 
 function validateCase(item) {
   if (!object(item) || !nonempty(item.id) || !categories.includes(item.category) || !nonempty(item.query)) throw new Error('Case needs id, known category, and nonempty query');
-  if (Object.keys(item).some(k => !['id','category','query','expected','search','notes'].includes(k))) throw new Error('Unknown benchmark case field');
+  if (Object.keys(item).some(k => !['id','category','query','expected','search','notes','class','suite','acceptable'].includes(k))) throw new Error('Unknown benchmark case field');
+  if (item.class !== undefined && !queryClasses.includes(item.class)) throw new Error('Unknown query class');
+  if (item.suite !== undefined && !querySuites.includes(item.suite)) throw new Error('Unknown query suite');
   if (item.search !== undefined && (!object(item.search) || Object.keys(item.search).some(k => !['filters','ranges','facets','identifier','orderBy'].includes(k)))) throw new Error('search only accepts actual searchQuery filters/ranges/facets/identifier/orderBy');
 }
 
-export async function benchmarkSearch(db, catalog, fixture, { category, fixtureHash = null, searchImplementationHash = null } = {}) {
+export async function benchmarkSearch(db, catalog, fixture, { category, suite, queryClass, fixtureHash = null, searchImplementationHash = null } = {}) {
   if (!Array.isArray(fixture) || !fixture.length) throw new Error('Benchmark fixture must be a nonempty JSON array');
   if (category !== undefined && !categories.includes(category)) throw new Error(`Unknown category: ${category}`);
+  if (suite !== undefined && ![...querySuites,'new'].includes(suite)) throw new Error(`Unknown suite: ${suite}`);
+  if (queryClass !== undefined && !queryClasses.includes(queryClass)) throw new Error(`Unknown query class: ${queryClass}`);
   const ids = new Map();
   for (const item of fixture) if (nonempty(item?.id)) ids.set(item.id, (ids.get(item.id) ?? 0) + 1);
-  const cases = category ? fixture.filter(q => q?.category === category) : fixture;
+  const cases = fixture.filter(q => (!category || q?.category === category) && (!suite ||
+    (suite === 'new' ? ['development','holdout'].includes(q?.suite) : (q?.suite ?? 'regression') === suite)) && (!queryClass || q?.class === queryClass));
   const results = [];
   for (const item of cases) {
     let query;
     let resolution;
+    let acceptable;
     const result = {
       id: item?.id ?? null, category: item?.category ?? null, query: item?.query ?? null, expected: item?.expected ?? null,
+      class:item?.class ?? 'unclassified', suite:item?.suite ?? 'regression', acceptable:item?.acceptable ?? null,
+      precision_at_5:null, precision_at_10:null, acceptable_count:null,
       search_options: item?.search ?? {}, notes: item?.notes ?? null,
       status: null, reason: null, rank: null, reciprocal_rank: 0,
       zero_results: null, retrieved_count: 0, search_exhausted: false,
       resolved_products: [], missing_targets: [], ambiguous_targets: [], top_results: [],
-      executed_pages: 0, rows_read: 0, elapsed_ms: 0, sql: null, params: [],
+      executed_pages: 0, rows_read: 0, elapsed_ms: 0, sql_duration_ms:0, size_bytes:null, sql: null, params: [],
     };
     try {
       validateCase(item);
@@ -120,6 +140,12 @@ export async function benchmarkSearch(db, catalog, fixture, { category, fixtureH
       if (resolution.status === 'EXPECTED_DATA_INVALID') {
         result.ambiguous_targets = resolution.ambiguous;
         throw new Error(resolution.reason);
+      }
+      if (item.acceptable !== undefined) {
+        const resolved = resolveExpected(catalog,item.category,item.acceptable);
+        if (resolved.status === 'EXPECTED_DATA_INVALID') throw new Error(`Invalid acceptable: ${resolved.reason}`);
+        acceptable = new Set(resolved.products.map(p => p.id));
+        result.acceptable_count = acceptable.size;
       }
     } catch (error) {
       result.status = 'EXPECTED_DATA_INVALID';
@@ -145,9 +171,15 @@ export async function benchmarkSearch(db, catalog, fixture, { category, fixtureH
       const page = await db.query(sql, params);
       result.executed_pages++;
       result.rows_read += page.meta?.rows_read ?? 0;
+      result.sql_duration_ms += page.meta?.duration ?? 0;
+      result.size_bytes = page.meta?.size_after ?? null;
       if (offset === 0) {
         result.zero_results = page.results.length === 0;
         result.top_results = page.results.slice(0,10).map((p,index) => ({ rank: index+1, ...productSummary(p) }));
+        if (acceptable) {
+          result.precision_at_5 = page.results.slice(0,5).filter(p => acceptable.has(p.id)).length/5;
+          result.precision_at_10 = page.results.slice(0,10).filter(p => acceptable.has(p.id)).length/10;
+        }
       }
       result.retrieved_count += page.results.length;
       result.search_exhausted = page.results.length < 100;
@@ -169,12 +201,15 @@ export async function benchmarkSearch(db, catalog, fixture, { category, fixtureH
   }
   await assertCatalogState(db, catalog.metadata.last_sync);
   return {
-    ...envelope('search_benchmark', catalog, { category: category ?? null, active_only: true }),
+    ...envelope('search_benchmark', catalog, { category: category ?? null, suite:suite ?? null, class:queryClass ?? null, active_only: true }),
     fixture_sha256: fixtureHash ?? createHash('sha256').update(JSON.stringify(fixture)).digest('hex'),
     search_implementation_sha256: searchImplementationHash,
-    evaluation: { hit_cutoffs: [1,5,10], page_size: 100, rank_scan: 'until_first_relevant_or_exhausted', invalid_fixture_policy: 'excluded_from_scores', missing_product_policy: 'zero_score' },
+    evaluation: { hit_cutoffs: [1,5,10], page_size: 100, rank_scan: 'until_first_relevant_or_exhausted', invalid_fixture_policy: 'excluded_from_scores', missing_product_policy: 'zero_score', precision_denominator:'K (unfilled slots are nonrelevant)', precision_aggregation:'macro average over explicit acceptable cases' },
     summary: benchmarkMetrics(results),
     by_category: Object.fromEntries(categories.filter(c => results.some(r => r.category === c)).map(c => [c, benchmarkMetrics(results.filter(r => r.category === c))])),
+    by_class: Object.fromEntries([...new Set(results.map(r => r.class))].map(c => [c,benchmarkMetrics(results.filter(r => r.class === c))])),
+    by_suite: Object.fromEntries(querySuites.filter(s => results.some(r => r.suite === s)).map(s => [s,benchmarkMetrics(results.filter(r => r.suite === s))])),
+    new_suite: benchmarkMetrics(results.filter(r => r.suite !== 'regression')),
     results,
   };
 }
