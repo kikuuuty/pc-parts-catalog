@@ -1,0 +1,14 @@
+{
+  "category": "gpu",
+  "keyword": "RTX 5080",
+  "filters": {
+    "chip_vendor": ["NVIDIA"],
+    "memory_type": ["GDDR7"]
+  },
+  "ranges": {
+    "vram_gb": { "min": 16 },
+    "length_mm": { "min": 250, "max": 320 }
+  },
+  "orderBy": "length_mm",
+  "limit": 20
+}

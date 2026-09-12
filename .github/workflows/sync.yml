@@ -1,0 +1,64 @@
+name: Sync BuildCores catalog
+on:
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: 'Upstream ref or commit (pin the same commit to resume an initial import)'
+        default: main
+        type: string
+      max_products:
+        description: 'Maximum changed/deleted products for this run'
+        default: '1000'
+        type: string
+      write_budget:
+        description: 'Run-local D1 row-write budget, below remaining daily Free allowance'
+        default: '80000'
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: catalog-production-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
+      MAX_PRODUCTS: ${{ inputs.max_products || '1000' }}
+      WRITE_BUDGET: ${{ inputs.write_budget || '80000' }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - name: Fetch a single immutable snapshot
+        run: npm run upstream:fetch -- --ref "$UPSTREAM_REF"
+      - name: Validate the entire snapshot before remote writes
+        run: npm run upstream:inspect
+      - run: npm run db:migrate -- --remote
+      - name: Resume incremental sync from D1 hashes
+        run: npm run sync -- --remote --max-products "$MAX_PRODUCTS" --write-budget "$WRITE_BUDGET"
+      - name: Job summary
+        if: always()
+        run: node scripts/action-summary.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: catalog-sync-reports
+          path: |
+            .cache/inspection.json
+            .cache/sync-report.json
+            .cache/notices/
+          retention-days: 30

@@ -1,0 +1,27 @@
+{
+  "name": "pc-parts-catalog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.0.0 <25" },
+  "scripts": {
+    "upstream:fetch": "node src/cli.js fetch",
+    "upstream:inspect": "node src/cli.js inspect",
+    "db:migrate": "node src/cli.js migrate",
+    "sync": "node src/cli.js sync",
+    "search": "node src/cli.js search",
+    "stats": "node src/cli.js stats",
+    "verify:plans": "node src/cli.js plans",
+    "schema:generate": "node scripts/generate-schema.js",
+    "schema:check": "node scripts/generate-schema.js --check",
+    "test": "node --test",
+    "check": "npm run schema:check && npm test"
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  },
+  "devDependencies": {
+    "wrangler": "4.131.1"
+  }
+}

@@ -1,0 +1,8 @@
+node_modules/
+.cache/
+.wrangler/
+.env
+.env.*
+.dev.vars*
+coverage/
+*.log

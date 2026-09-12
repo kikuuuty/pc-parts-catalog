@@ -1,0 +1,10 @@
+{
+  "category": "memory",
+  "filters": { "ram_type": ["DDR5"], "kit_quantity": [2], "expo": [1] },
+  "ranges": {
+    "capacity_gb": { "min": 32 },
+    "speed": { "min": 6000 },
+    "cas_latency": { "max": 30 }
+  },
+  "orderBy": "speed"
+}

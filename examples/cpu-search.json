@@ -1,0 +1,14 @@
+{
+  "category": "cpu",
+  "filters": {
+    "manufacturer": ["AMD"],
+    "family": ["Ryzen 7"],
+    "socket": ["AM5"]
+  },
+  "ranges": {
+    "core_count": { "min": 8 },
+    "tdp_w": { "min": 65, "max": 125 },
+    "boost_clock_ghz": { "min": 5 }
+  },
+  "orderBy": "core_count"
+}
