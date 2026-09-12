@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DatabaseSync } from 'node:sqlite';
-import { readFileSync } from 'node:fs';
+import { database } from '../test-support/database.js';
 import { randomUUID } from 'node:crypto';
 import { normalize, cpuClass, gpuSeries, identifierKey, pcie } from '../src/normalize.js';
 import { searchQuery, keywordExpression } from '../src/queries.js';
@@ -19,19 +18,6 @@ const product = (overrides = {}) => ({
   identifiers: { version: 1, identifiers: [{ type: 'mpn', value: '100-TEST', region: 'all' }, { type: 'ean', value: '0012345678901', region: 'all' }], retailer_listings: [] },
   ...overrides,
 });
-function database() {
-  const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec('PRAGMA foreign_keys=ON');
-  for (const name of ['0001_catalog.sql', '0002_specs_ingest.sql', '0003_query_plan_tuning.sql']) sqlite.exec(readFileSync(new URL(`../migrations/${name}`, import.meta.url), 'utf8'));
-  return {
-    sqlite,
-    async query(sql, params = []) {
-      const before = sqlite.prepare('SELECT total_changes() AS n').get().n;
-      const results = sqlite.prepare(sql).all(...params);
-      return { results, meta: { changes: sqlite.prepare('SELECT changes() AS n').get().n, rows_written: sqlite.prepare('SELECT total_changes() AS n').get().n - before, rows_read: results.length } };
-    },
-  };
-}
 const snapshot = records => ({ commit: COMMIT, records });
 const row = (db, sql, ...params) => db.sqlite.prepare(sql).get(...params);
 const count = (db, table) => row(db, `SELECT count(*) AS n FROM ${table}`).n;

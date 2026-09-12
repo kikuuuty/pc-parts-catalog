@@ -6,12 +6,20 @@ import { defaultRepo, fetchUpstream, loadSnapshot } from './upstream.js';
 import { openDatabase } from './database.js';
 import { syncSnapshot } from './sync.js';
 import { searchQuery, verifyPlans } from './queries.js';
+import { createHash } from 'node:crypto';
+import { loadQualityCatalog } from './quality/catalog.js';
+import { auditCompleteness, auditDuplicates } from './quality/audit.js';
+import { benchmarkSearch } from './quality/benchmark.js';
+import { formatCompleteness, formatDuplicates, formatBenchmark } from './quality/format.js';
 
 const { values: args, positionals } = parseArgs({ allowPositionals: true, options: {
   remote: { type: 'boolean', default: false }, repo: { type: 'string', default: defaultRepo }, ref: { type: 'string', default: 'main' },
   'dry-run': { type: 'boolean', default: false }, 'max-products': { type: 'string' }, 'write-budget': { type: 'string' }, 'max-delete-fraction': { type: 'string', default: '0.2' },
   category: { type: 'string' }, keyword: { type: 'string' }, filters: { type: 'string' }, ranges: { type: 'string' }, facets: { type: 'string' },
   identifier: { type: 'string' }, 'identifier-type': { type: 'string' }, limit: { type: 'string' }, order: { type: 'string' }, explain: { type: 'boolean', default: false }, 'query-file': { type: 'string' },
+  manufacturer: { type: 'string' }, field: { type: 'string' }, 'by-manufacturer': { type: 'boolean' },
+  'year-from': { type: 'string' }, 'year-to': { type: 'string' }, 'unknown-year': { type: 'boolean' }, 'include-inactive': { type: 'boolean' },
+  json: { type: 'boolean' }, verbose: { type: 'boolean' }, output: { type: 'string' }, fixture: { type: 'string' },
 } });
 const [command] = positionals;
 const print = object => console.log(JSON.stringify(object, null, 2));
@@ -24,6 +32,44 @@ const positiveInteger = (value, fallback) => {
 
 async function main() {
   await mkdir('.cache', { recursive: true });
+  if (['audit-completeness','audit-duplicates','benchmark-search'].includes(command)) {
+    if (command === 'benchmark-search' && ['manufacturer','field','by-manufacturer','year-from','year-to','unknown-year','include-inactive','limit'].some(k => args[k] !== undefined)) throw new Error('Benchmark scope is controlled by --category and the fixture search options');
+    if (command === 'audit-duplicates' && (args.field !== undefined || args['by-manufacturer'])) throw new Error('--field/--by-manufacturer are completeness options');
+    const db = await openDatabase(args.remote);
+    try {
+      const catalog = await loadQualityCatalog(db);
+      const options = {
+        category: args.category, manufacturer: args.manufacturer, field: args.field,
+        byManufacturer: args['by-manufacturer'], includeInactive: args['include-inactive'], unknownYear: args['unknown-year'],
+        yearFrom: args['year-from'] === undefined ? undefined : Number(args['year-from']),
+        yearTo: args['year-to'] === undefined ? undefined : Number(args['year-to']),
+      };
+      let report;
+      let format;
+      if (command === 'audit-completeness') {
+        report = auditCompleteness(catalog, options);
+        format = formatCompleteness;
+      } else if (command === 'audit-duplicates') {
+        report = auditDuplicates(catalog, options);
+        format = value => formatDuplicates(value, { verbose: args.verbose, limit: positiveInteger(args.limit, 10) });
+      } else {
+        const input = await readFile(args.fixture ?? 'test/fixtures/search-benchmark.json', 'utf8');
+        const implementation = await readFile(new URL('./queries.js', import.meta.url));
+        report = await benchmarkSearch(db, catalog, JSON.parse(input), {
+          category: args.category,
+          fixtureHash: createHash('sha256').update(input).digest('hex'),
+          searchImplementationHash: createHash('sha256').update(implementation).digest('hex'),
+        });
+        format = value => formatBenchmark(value, { verbose: args.verbose });
+      }
+      if (args.output) await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
+      if (args.json) print(report);
+      else console.log(format(report));
+      // Low baseline scores are measurements, not command errors. Broken fixtures need attention.
+      if (report.kind === 'search_benchmark' && report.summary.failures.EXPECTED_DATA_INVALID) process.exitCode = 1;
+    } finally { await db.close(); }
+    return;
+  }
   if (command === 'fetch') return fetchUpstream({ repo: args.repo, ref: args.ref });
   if (command === 'migrate') {
     let config = 'wrangler.json';
@@ -44,7 +90,7 @@ async function main() {
     print({ commit: snapshot.commit, counts: Object.fromEntries(Object.entries(snapshot.report.categories).map(([k,v]) => [k,v.count])), report: '.cache/inspection.json' });
     return;
   }
-  if (!['sync','search','stats','plans'].includes(command)) throw new Error('Commands: fetch, inspect, migrate, sync, search, stats, plans. See README.md');
+  if (!['sync','search','stats','plans'].includes(command)) throw new Error('Commands: fetch, inspect, migrate, sync, search, stats, plans, audit-completeness, audit-duplicates, benchmark-search. See README.md');
   // Fetch/validate/normalize the entire snapshot BEFORE opening a write connection.
   const snapshot = command === 'sync' ? await loadSnapshot(args.repo) : null;
   const db = await openDatabase(args.remote);

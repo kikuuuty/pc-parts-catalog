@@ -352,6 +352,177 @@ npm run stats
 新しいmigrationを追加してください。正規化規則変更時は `NORMALIZER_VERSION` を上げて再同期します。
 現在の初期INDEXからの実測に基づく調整は `0003_query_plan_tuning.sql` にあります。
 
+## Catalog quality audit
+
+現在のDBに対する完全性・重複候補・検索品質の読み取り専用監査です。
+上流の再取得は不要で、既存の `openDatabase()` / `db.query()` を使います。
+初回の実測は [docs/catalog-quality-baseline.md](docs/catalog-quality-baseline.md) にまとめています。
+
+```sh
+npm run audit:completeness
+npm run audit:duplicates
+npm run benchmark:search
+```
+
+### 完全性（completeness）
+
+```sh
+npm run audit:completeness -- --category gpu --field length_mm --by-manufacturer
+npm run audit:completeness -- --category gpu --manufacturer ASUS
+npm run audit:completeness -- --category cpu --year-from 2024 --year-to 2026
+npm run audit:completeness -- --category storage --unknown-year
+npm run audit:completeness -- --include-inactive
+```
+
+- カテゴリ・スペック列は `src/model.js`、共通製品列はDBの `PRAGMA table_info(products)` から取得。
+  内部ID・同期管理列を除く共通列を監査し、監査用の別モデル定義は持ちません。
+- `total_products` / `active_products` は指定したカテゴリ・メーカー・期間内の件数。
+  フィールドの標準母数はその中の**active製品数**です。`--include-inactive` で全製品を母数にできます。
+- 各フィールドに `total` / `present` / `missing` / `coverage` / `missing_rate` を出力。
+  JSONの率は0～1、母数0は `null`（人間向け表示はN/A）です。
+- NULL・空文字・空白だけの文字列を欠損扱いにします。**0やfalseは存在する値**です。
+  `None` / `Unknown` の文字列もそのまま存在する値として数えます。
+- 共通列とスペック列は `product.manufacturer` / `spec.manufacturer` のように区別します。
+  `--field length_mm` と `--field spec.length_mm` の両方を利用できます。
+  カテゴリ指定なしのfield指定では、そのフィールドが存在するカテゴリだけを集計します。
+- identifierは `identifiers` viewのupstream/local両方を対象に、種類別の**保有製品数**を数えます。
+  同じ製品の複数MPN、地域違い、canonical/metadataの重複行は保有率を水増ししません。
+  種別は既存のlocal identifier CHECK制約とDBの実在種別から取得します。
+  EAN/UPCをGTIN/JANへ自動的に読み替えないため、`jan=0` は「JAN種別での登録が0」の意味です。
+- 年の上下限は包含条件です。期間指定時にrelease_year不明の製品は含めません。
+  `--unknown-year` で別途調べられます（期間指定との併用は不可）。メーカーは既存のメーカー正規化を再利用して照合します。
+
+充足率は**値の存在率**で、仕様の正しさ・適用対象・独自検証済み率ではありません。
+例えば空冷のradiator_size、バリエーションのない製品のvariant欠損は必ずしも不良データではありません。
+恣意的な「critical fields総合点」は作らず、フィールド別とidentifierの客観的な件数を優先します。
+
+### 重複候補（duplicates）
+
+```sh
+npm run audit:duplicates -- --category gpu --manufacturer ASUS
+npm run audit:duplicates -- --limit 5
+npm run audit:duplicates -- --verbose
+```
+
+- MPNは **メーカー＋`identifierKey(value)`**、他の種別は **type＋`identifierKey(value)`** でグループ化。
+  既存正規化と同様、先頭0・ハイフン・内部空白を保持します。
+- 2つ以上の異なるproduct IDが共有する場合に `IDENTIFIER_CONFLICT` として出します。
+  regionはグループを分割せず、値・region・origin・origin_fieldを確認根拠として残します。
+  メーカー不明のMPNグループには `manufacturer_missing` を付けます。
+- 名称候補はカテゴリ＋正規化メーカー＋名称のNFKC/空白整理/小文字化で比較。
+  identifierがない製品も含み、`POSSIBLE_DUPLICATE_NAME` として出力します。
+  同名でも異なるキット・地域・仕様の可能性があり、重複確定とは扱いません。
+- `identifier_key_mismatch_rows` は現在のraw valueから既存関数で算出したキーと保存キーの不一致件数。
+- 完全性と同じメーカー・期間・active条件を指定可能です。
+  `--limit` は人間向けに表示するグループ数だけを制限します（既定10、各グループ5製品まで）。
+  集計自体とJSONは常に全候補を含みます。`--verbose` は全候補・全製品を表示します。
+
+### 検索ベンチマーク
+
+```sh
+npm run benchmark:search
+npm run benchmark:search -- --category cpu --verbose
+npm run benchmark:search -- --fixture test/fixtures/search-benchmark.json
+```
+
+Golden Queryは `test/fixtures/search-benchmark.json` の40ケースです。
+実DBで製品とidentifierを確認し、期待値を検索結果の順位から自動生成しない方針で作成しました。
+広いシリーズ検索では、確認した許容製品のID集合のどれかが最初に出た順位を評価します。
+名前完全一致だけへの依存を避け、ID、identifier、MPN、名称条件に対応します。
+
+検索は**現在の `searchQuery()` が生成するSQLそのもの**を使用します。
+100件単位で読み、必要な場合だけそのSQLに `OFFSET ?` を付けて続きを取得します。
+既存クエリがD1の100-bind上限に達している場合は、内部で数えた整数OFFSETをSQLに直接付けます。
+WHERE/FTS/ORDER BYは変更せず、期待製品が見つかるか検索結果を読み尽くすまで順位を調べます。
+従って101位以降を誤って「検索一致なし」に分類しません。
+
+|指標|定義|
+|---|---|
+|Hit@1 / Hit@5 / Hit@10|最初の許容製品が上位K件以内にある検索の割合|
+|MRR|最初の許容製品の順位の逆数の平均。10位や100位で打ち切らない|
+|zero_result_count|実際に実行した検索が0件だった数|
+|query_count|指定範囲のfixtureケース数|
+|scored_query_count|不正なfixtureを除いた採点母数。MISSING_PRODUCTは含み、0点とする|
+|failed_query_count|上位10件に入らなかったケース数。不正fixtureも別分類で含む|
+
+失敗分類:
+
+- `MISSING_PRODUCT`: 期待する製品がカテゴリ内のDBに存在しない。許容集合なら全候補が不存在の場合。
+- `NO_SEARCH_MATCH`: 製品は存在するが現在の検索条件に一致しない。
+  inactive / スペック行欠落の場合はそれぞれ `INACTIVE_PRODUCT` / `MISSING_SPEC_ROW` を理由に記録。
+  その他は現在のFTS・identifier・typed条件の組み合わせで非一致と報告し、原因を過剰に断定しません。
+- `RANKING_FAILURE`: 一致するが11位以下。
+- `EXPECTED_DATA_INVALID`: 形式不正、重複したcase ID、不明な検索条件、単一selectorで複数製品に一致するなど。
+
+デフォルトは総合スコアと失敗ケースのquery・expected・rank・上位10件を表示します。
+`--verbose` とJSONでは成功ケースも確認できます。`retrieved_count` は診断で実際に取得した件数で、
+検索総ヒット数ではありません。`search_exhausted` とページ数も記録します。
+DB/APIエラーは0件検索に変換せずコマンドを失敗させます。
+低スコアは測定結果なので終了コード0、不正fixtureや実行エラーは1です。
+
+### JSON出力・再現性
+
+```sh
+npm run --silent audit:completeness -- --json --output .cache/completeness.json
+npm run --silent audit:duplicates -- --json --output .cache/duplicates.json
+npm run --silent benchmark:search -- --json --output .cache/search-benchmark.json
+```
+
+`node src/cli.js <command> --json` も純粋なJSONをstdoutに出します。
+npmのバナーを抑えて機械処理する場合は上記の `--silent` を付けてください。
+`--output` はJSONをファイルにも保存します（親ディレクトリは事前に用意）。
+`--json` なしで `--output` を使うと、コンソールは人間向け表示・ファイルはJSONになります。
+
+共通形式は `schema_version: 1`、`kind`、`generated_at`、`catalog`、`scope`、`summary`。
+詳細は完全性の `categories`、重複の `identifier_conflicts` / `possible_name_duplicates`、
+ベンチマークの `results` / `by_category` に格納します。出典とODC-By通知も `catalog.sources` に含めます。
+
+`catalog_sha256` は監査で読んだ製品行（内部ID・同期情報を含む）・型付きスペック・identifierの指紋です。
+ベンチマークはfixtureファイルと `src/queries.js` のSHA-256、実行SQL/paramsも保存します。
+同じ上流commitでも独自identifierや内部IDが違えば、別の測定対象として区別できます。
+raw JSONの直接比較・外部公式サイトとの照合はこの監査に含めません。
+
+測定中は同期・手動補完のwriterを停止してください。live sync leaseと測定前後のsync runを確認し、
+同期を検知した場合は中断します。複数のD1クエリに跨がる全DBスナップショットトランザクションは取得しないため、
+同期を通さない外部書込との同時実行は再現性を保証しません。
+コマンドは全カタログをページ単位で読み込み、現行約3万製品をメモリ上で集計するため、通常の製品検索より読み取り量が多くなります。
+既存接続の `--remote` にも対応しますが、baseline測定はローカルD1で確認しています。
+
+### Golden Queryの追加
+
+1. 現在DBの製品・identifierを確認し、検索意図と対応するSKUを決めます。
+2. fixtureに一意な `id`、既存 `category`、`query`、`expected` を追加します。
+3. `benchmark:search -- --verbose` で解決された製品と順位を確認します。
+   不正/曖昧な期待値を検索実装の不具合として数えないでください。
+
+```json
+{
+  "id": "cpu-285k-additional-example",
+  "category": "cpu",
+  "query": "intel 285k",
+  "expected": { "upstream_id": "e2cf2532-8c57-4ec2-96fb-4aaa846c8ca6" }
+}
+```
+
+`expected` は以下のいずれかを使用できます。
+
+- `{ "upstream_id": "<UUID>" }` または `{ "upstream_key": "CPU/<UUID>" }`
+- `{ "identifier": { "type": "mpn", "value": "BX80768285K", "region": "all" }, "manufacturer": "Intel" }`（regionは任意）
+- `{ "mpn": "BX80768285K", "manufacturer": "Intel" }`
+- `{ "nameContains": ["Core Ultra 9", "285K"], "manufacturer": "Intel" }`（NFKC/大小文字を無視したAND条件）
+- `{ "upstream_ids": ["<UUID-1>", "<UUID-2>"] }`（許容集合）
+- `{ "anyOf": [{ "upstream_id": "<UUID>" }, { "mpn": "<MPN>" }] }`（種類の異なるselectorの許容集合）
+
+単一selectorが複数製品に一致したらinvalidです。必要なら `manufacturer` / `source` で絞るか、
+`upstream_ids` / `anyOf` に確認済みの個別IDを列挙します。
+許容集合の一部だけが消えた場合も `missing_targets` と `missing_expected_target_count` に残します。
+rootに `search` を追加すると、既存検索の `filters` / `ranges` / `facets` / `identifier` / `orderBy` を併用できます。
+`limit` とkeywordはベンチマーク側が管理します。名称/MPN条件をIDと同じselectorに混ぜて暗黙fallbackすることはありません。
+
+オフラインの `npm test` は小さな合成DBで監査・指標・125位の検出・原因分類を検証します。
+GitHub CIでは既存の実データ取込後に3つの監査を実行し、JSONをartifactに保存します。
+40ケースは代表的なモデル検索のbaselineで、全カテゴリ・全製品の検索適合率を保証するものではありません。
+
 ## ライセンス・Attribution
 
 データソースは **BuildCores OpenDB**:

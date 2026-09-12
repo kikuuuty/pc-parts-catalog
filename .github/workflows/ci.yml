@@ -22,6 +22,9 @@ jobs:
       - run: npm run sync
       - run: npm run verify:plans
       - run: npm run stats
+      - run: npm run audit:completeness -- --output .cache/completeness.json
+      - run: npm run audit:duplicates -- --output .cache/duplicates.json
+      - run: npm run benchmark:search -- --output .cache/search-benchmark.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -30,4 +33,7 @@ jobs:
             .cache/inspection.json
             .cache/sync-report.json
             .cache/query-plans.json
+            .cache/completeness.json
+            .cache/duplicates.json
+            .cache/search-benchmark.json
           retention-days: 7
