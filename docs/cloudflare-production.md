@@ -3,6 +3,8 @@
 最新の全量同期・deploy・実HTTP検証は [production-paid-baseline.md](production-paid-baseline.md)。
 現在のGET cache設計・最新deploy・D1 read削減実測は [production-cache.md](production-cache.md)。
 最新のD1 MISS/POST Rate Limiting・deploy・stampedeの未達事項は [production-rate-limiting.md](production-rate-limiting.md)。
+最新のSQL read最適化・deploy・CPU/Free評価は [broad-query-read-optimization.md](broad-query-read-optimization.md)。
+`ddr5` MISSは35,963→16,568 reads、broad corpus合計48.80%削減。候補・ranking・API/cache/rate契約は維持。
 初回Free/partial時点の履歴は [production-baseline.md](production-baseline.md)。
 派生FTSの現在の生成規則と0006適用結果は [FTS projection consistency](fts-projection-consistency.md)。
 検索SQL、ranking、Golden expected、カタログ正規化は既存Phase 2を共有する。
@@ -135,6 +137,8 @@ SQL時間、query elapsed合計・p50/p95/max、top 10の `upstream_key` 順、c
 
 0006適用前は厳密top 10比較で5件の差があり、[当時の診断結果](production-paid-baseline.md#local-phase-2との厳密順位差)を履歴として保持している。
 0006適用後はlocal upgraded / fresh / remoteの全FTS内容と120 queryのtop 20順が一致した。
+その後のread最適化では、local161ケース・remote代表19ケースの全候補/score/結果不変を確認した。
+query plansはbroad/generic等を追加して37件。新INDEX/migrationなし、CPU最大値とlatencyの非悪化は未証明なのでFree判断には実traffic観測も必要。
 数値のstrict比較・跨runtimeの微小浮動小数差・費用計測手順は[0006検証結果](fts-projection-consistency.md)を参照。
 
 `verify:api --direct-only` は主要11検索を既定3回ずつ、APIと同じLIMIT 21＋bound OFFSET 0で計測する。

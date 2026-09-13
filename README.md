@@ -26,6 +26,9 @@ TTL 300秒・同期後epoch更新・Free換算は [production cache実測](docs/
 cache HIT後・D1直前のRate Limitingも導入しました。通常mixedの429=0・read削減率を維持し、POSTの429/D1=0を本番確認済みです。
 **分散cold stampedeの削減は本番6並列で未達**です。binding設定、unique burstのoffline検証、CPU、Freeの要再確認事項は
 [production rate protection](docs/production-rate-limiting.md) を参照してください。
+検索SQLも候補・順位・score不変で最適化し、`ddr5` MISSを35,963→16,568 reads（53.93%削減）、
+broad 29 query合計を48.80%削減しました。120 Goldenのtop20一致、CPU実測とFree再試算は
+[broad query read最適化](docs/broad-query-read-optimization.md)を参照してください。
 
 ## クイックスタート
 

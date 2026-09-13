@@ -3,6 +3,19 @@ import { identifierKey } from './normalize.js';
 import { parseSearchIntent, specSeed } from './search-intent.js';
 
 const common = { manufacturer: 'TEXT', series: 'TEXT', variant: 'TEXT', release_year: 'INTEGER' };
+const productColumns = ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
+const productProjection = `${productColumns.map(field => `p.${field}`).join(',')},s.*`;
+// Immutable schema-derived SQL fragments, not a query/result cache. Reuse them
+// even on cache HIT validation instead of rebuilding dozens of aliases per call.
+const searchColumns = Object.fromEntries(Object.entries(models).map(([category, model]) => {
+  const specColumns = ['product_id', ...Object.keys(model.fields)];
+  return [category, {
+    carried: [...productColumns.map(field => `p.${field} AS _p_${field}`),
+      ...specColumns.map(field => `s.${field} AS _s_${field}`)].join(','),
+    projection: [...productColumns.map(field => `r._p_${field} AS ${field}`),
+      ...specColumns.map(field => `r._s_${field} AS ${field}`)].join(','),
+  }];
+}));
 function keywordTokens(value) {
   if (typeof value !== 'string' || value.length > 200) throw new Error('Keyword must be at most 200 characters');
   const tokens = value.normalize('NFKC').match(/[\p{L}\p{N}]+/gu) ?? [];
@@ -135,6 +148,8 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   let withSQL = '';
   let from = `products p JOIN ${model.table} s ON s.product_id=p.id`;
   let diagnostics = '';
+  let projection = productProjection;
+  let order = orderBy ? `${column(orderBy)},s.product_id` : 'p.id';
   let predicates = where.join(' AND ');
   if (keyword !== undefined) {
     keywordTokens(keyword); // Validate the original input before consuming semantic tokens.
@@ -161,11 +176,29 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
         FROM product_fts WHERE ${guard}product_fts MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}
       UNION ALL SELECT i.product_id,0 FROM local_identifier_fts JOIN local_identifiers i ON i.id=local_identifier_fts.rowid
         WHERE ${guard}local_identifier_fts MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}`;
-    const candidates = (hits, mode) => `SELECT h.id,max(h.relevance) AS relevance,${mode} AS fallback
-      FROM ${hits} h CROSS JOIN products p ON p.id=h.id CROSS JOIN ${model.table} s ON s.product_id=p.id
-      WHERE ${scoped} GROUP BY h.id`;
+    // Both joins are PK lookups: each hit ID determines exactly one product/spec
+    // row. Deduplicate narrow hits first, then fetch those columns only once
+    // for scope, ranking and results. Separate aliases
+    // preserve common/spec name collisions (notably CPU manufacturer).
+    const { carried } = searchColumns[category];
+    const rankColumns = sql => sql.replace(/\bp\.([a-z_]+)/g, 'c._p_$1').replace(/\bs\.([a-z_]+)/g, 'c._s_$1');
+    const candidates = (hits, mode) => `SELECT h.id,h.relevance,${mode} AS fallback,${carried}
+      FROM (SELECT id,max(relevance) AS relevance FROM ${hits} GROUP BY id) h
+      CROSS JOIN products p ON p.id=h.id CROSS JOIN ${model.table} s ON s.product_id=p.id
+      WHERE ${scoped}`;
     const matches = field => `p.id IN (SELECT rowid FROM product_fts WHERE product_fts MATCH
       ${terms.fallback ? `CASE WHEN NOT EXISTS (SELECT 1 FROM strict) THEN ${value(`fallback.${field}`)} ELSE ${value(`strict.${field}`)} END` : value(`strict.${field}`)})`;
+    // CASE is first-match wins. A later identical MATCH predicate is unreachable
+    // after an earlier false result; keep only the first (highest-priority) tier.
+    // Both strict and fallback expressions must agree before a clause is folded.
+    const seenMatches = new Set();
+    const matchTiers = intent.specOnly ? '' : [['namePhrase', 650], ['nameExact', 600], ['modelExact', 500],
+      ['namePrefix', 400], ['familyExact', 300], ['fieldsExact', 200]].flatMap(([field, tier]) => {
+      const signature = JSON.stringify([terms.strict[field], terms.fallback?.[field] ?? null]);
+      if (seenMatches.has(signature)) return [];
+      seenMatches.add(signature);
+      return [`WHEN ${matches(field)} THEN ${tier}`];
+    }).join('\n          ');
     const specConditions = intent.specs.map((spec,i) => `s.${spec.field}=${value(`intent.specs[${i}].value`)}`);
     const identityCondition = intent.identity ? `s.chipset IN (SELECT value FROM json_each(${value('intent.identity.values')}))` : '0';
     const familyCondition = intent.family ? `s.family=${value('intent.family')}` : '0';
@@ -183,35 +216,30 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     // NULL is neutral, not an old year. A fixed reference makes same-DB ordering
     // independent of wall-clock time. Only recognized CPU family queries opt in.
     const freshness = intent.family ? `CASE WHEN ${familyCondition} AND p.release_year IS NOT NULL THEN max(-0.05,min(0.05,(p.release_year-2022)*0.01)) ELSE 0 END` : '0';
-    withSQL = `WITH search_input AS (SELECT ${input} AS q),
-      exact_identifiers AS MATERIALIZED (
-        SELECT DISTINCT product_id FROM identifiers WHERE value_key=${key} AND
-          ((${value('identifierKind')}='mpn' AND type='mpn') OR
-           (${value('identifierKind')}='barcode' AND type IN ('gtin','ean','upc','jan')))
-      ),
-      trusted_identifiers AS (SELECT product_id FROM exact_identifiers WHERE (SELECT count(*) FROM exact_identifiers)<=3),
-      strict_fts AS MATERIALIZED (${fts('strict')}
-        UNION ALL SELECT product_id,0 FROM trusted_identifiers ${typed}),
-      strict AS MATERIALIZED (${candidates('strict_fts',0)}),
-      ${terms.fallback ? `fallback_fts AS MATERIALIZED (${fts('fallback','NOT EXISTS (SELECT 1 FROM strict) AND ')}),
-      candidates AS (${candidates('fallback_fts',1)} UNION ALL SELECT * FROM strict),` : 'candidates AS (SELECT * FROM strict),'}
-      ranked AS MATERIALIZED (
-        SELECT c.*, CASE
+    // identifierKind is already derived from the unchanged input grammar. An
+    // ineligible shape cannot produce a trusted identifier; avoid opening that
+    // view at all. Keep the key parameter slot even in the empty branch.
+    const exactIdentifiers = terms.identifierKind ? `SELECT DISTINCT product_id FROM identifiers WHERE value_key=${key} AND
+      ${terms.identifierKind === 'mpn' ? "type='mpn'" : "type IN ('gtin','ean','upc','jan')"}`
+      : `SELECT NULL AS product_id WHERE 0 AND ${key} IS NULL`;
+    const ranking = rankColumns(`SELECT c.*, CASE
           WHEN c.fallback=0 AND p.id IN (SELECT product_id FROM trusted_identifiers) THEN 800
           WHEN lower(trim(p.name))=${value('name')} THEN 700
           ${intent.specOnly ? 'ELSE 600' : `WHEN ${identityCondition} OR ${familyCondition} THEN 675
           ${intent.specs.length ? `WHEN ${manufacturer}=${value('intent.remaining')} THEN 650` : ''}
-          WHEN ${matches('namePhrase')} THEN 650
-          WHEN ${matches('nameExact')} THEN 600
-          WHEN ${matches('modelExact')} THEN 500
-          WHEN ${matches('namePrefix')} THEN 400
-          WHEN ${matches('familyExact')} THEN 300
-          WHEN ${matches('fieldsExact')} THEN 200
+          ${matchTiers}
           ELSE 100`} END AS tier,
           ${specScore} AS spec_score,${manufacturerScore} AS manufacturer_score,${freshness} AS freshness_score
-        FROM candidates c CROSS JOIN products p ON p.id=c.id
-        ${intent.specs.length || intent.identity || intent.family ? `CROSS JOIN ${model.table} s ON s.product_id=p.id` : ''}
-      ), scored AS (
+        FROM candidates c`);
+    withSQL = `WITH search_input AS (SELECT ${input} AS q),
+      exact_identifiers AS MATERIALIZED (${exactIdentifiers}),
+      trusted_identifiers AS (SELECT product_id FROM exact_identifiers WHERE (SELECT count(*) FROM exact_identifiers)<=3),
+      strict_fts AS NOT MATERIALIZED (${fts('strict')}
+        UNION ALL SELECT product_id,0 FROM trusted_identifiers ${typed}),
+      strict AS ${terms.fallback ? 'MATERIALIZED' : 'NOT MATERIALIZED'} (${candidates('strict_fts',0)}),
+      ${terms.fallback ? `fallback_fts AS NOT MATERIALIZED (${fts('fallback','NOT EXISTS (SELECT 1 FROM strict) AND ')}),
+      candidates AS (${candidates('fallback_fts',1)} UNION ALL SELECT * FROM strict),` : 'candidates AS (SELECT * FROM strict),'}
+      ranked AS ${debug ? 'MATERIALIZED' : 'NOT MATERIALIZED'} (${ranking}), scored AS (
         SELECT *,tier + spec_score + manufacturer_score + freshness_score + relevance/(1+relevance) - fallback*1000 AS score,
           CASE WHEN fallback=1 THEN 'fallback' ${intent.specOnly ? "WHEN tier<700 THEN 'spec-intent'" : ''} ELSE CASE tier
             WHEN 800 THEN 'exact-identifier' WHEN 700 THEN 'exact-name' WHEN 675 THEN 'family-chipset'
@@ -219,17 +247,19 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
             WHEN 400 THEN 'prefix-name' WHEN 300 THEN 'series-variant'
             WHEN 200 THEN 'field-tokens' ELSE 'fts' END END AS match_type FROM ranked
       ) `;
-    // Keep candidate IDs outermost even for empty strict / tiny fallback sets;
-    // SQLite otherwise sometimes scans the entire catalog to build an automatic join index.
-    from = `scored r CROSS JOIN products p ON p.id=r.id CROSS JOIN ${model.table} s ON s.product_id=p.id`;
+    // GROUP BY keeps FTS bm25 evaluation inside the hit co-routine. Only fallback
+    // needs to reuse strict, and debug needs to reuse ranking across output fields.
+    // The public path evaluates ranking once for ORDER BY, without a ranked spool.
+    from = 'scored r';
+    projection = searchColumns[category].projection;
+    order = orderBy ? `${column(orderBy).replace(/^([ps])\./, 'r._$1_')},r._s_product_id` : 'r.score DESC,r.id';
     predicates = '1=1'; // Scope was applied before the strict-empty/fallback decision.
     if (debug) diagnostics = ',r.score AS search_score,r.match_type AS search_match,r.relevance AS search_fts_relevance,r.tier AS model_score,r.spec_score,r.manufacturer_score,r.freshness_score,r.fallback AS search_fallback';
   }
-  const order = orderBy ? `${column(orderBy)},s.product_id` : keyword === undefined ? 'p.id' : 'r.score DESC,p.id';
   params.push(limit);
   if (params.length > 100) throw new Error('D1 supports at most 100 bound parameters');
   return {
-    sql: `${withSQL}SELECT p.id,p.upstream_id,p.upstream_key,p.category,p.manufacturer,p.name,p.series,p.variant,p.release_year,p.manufacturer_url,s.*${diagnostics} FROM ${from} WHERE ${predicates} ORDER BY ${order} LIMIT ?`,
+    sql: `${withSQL}SELECT ${projection}${diagnostics} FROM ${from} WHERE ${predicates} ORDER BY ${order} LIMIT ?`,
     params,
   };
 }
@@ -263,7 +293,21 @@ export const representativeQueries = [
   { name: '26 Storage NVMe capacity', category: 'storage', options: { keyword:'nvme 2tb' }, indexes:['storage_capacity'] },
   { name: '27 Memory type only', category: 'memory', options: { keyword:'ddr5' }, indexes:['memory_type_speed'] },
   { name: '28 Memory total capacity', category: 'memory', options: { keyword:'ddr5 32gb' }, indexes:['memory_search_capacity'] },
+  { name: '29 Memory broad type and speed', category: 'memory', options: { keyword: 'ddr5 6000' }, indexes: ['memory_search_speed'] },
+  { name: '30 Memory bare numeric token', category: 'memory', options: { keyword: '6000' }, indexes: ['VIRTUAL TABLE INDEX'] },
+  { name: '31 Memory capacity only', category: 'memory', options: { keyword: '32gb' }, indexes: ['memory_search_capacity'] },
+  { name: '32 GPU broad family word', category: 'gpu', options: { keyword: 'geforce' }, indexes: ['VIRTUAL TABLE INDEX'] },
+  { name: '33 CPU manufacturer across FTS categories', category: 'cpu', options: { keyword: 'intel' }, indexes: ['VIRTUAL TABLE INDEX'] },
+  { name: '34 PSU unindexed spec intent', category: 'psu', options: { keyword: 'gold' }, indexes: ['VIRTUAL TABLE INDEX'] },
+  { name: '35 Storage unindexed spec intent', category: 'storage', options: { keyword: 'nvme' }, indexes: ['VIRTUAL TABLE INDEX'] },
+  { name: '36 Case broad form factor word', category: 'case', options: { keyword: 'atx' }, indexes: ['VIRTUAL TABLE INDEX'] },
+  { name: '37 Memory category listing', category: 'memory', options: {}, indexes: [] },
 ];
+
+export function hasCatalogFullScan(details) {
+  const names = ['p', 's', 'products', ...Object.values(models).map(model => model.table)].join('|');
+  return details.some(detail => new RegExp(`^SCAN (?:${names})(?:$| )`).test(detail));
+}
 
 export async function verifyPlans(db) {
   const reports = [];
@@ -272,7 +316,7 @@ export async function verifyPlans(db) {
     const plan = await db.query(`EXPLAIN QUERY PLAN ${sql}`, params);
     const details = plan.results.map(r => r.detail);
     const rows = await db.query(sql, params);
-    const fullScan = details.some(d => /^SCAN (?:p|s)(?:$| USING)/.test(d));
+    const fullScan = hasCatalogFullScan(details);
     const used = q.indexes.every(index => details.some(d => d.includes(index))) && !fullScan;
     reports.push({ name: q.name, sql, params, plan: details, index_check: used, catalog_full_scan: fullScan, returned: rows.results.length, meta: rows.meta });
   }
