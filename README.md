@@ -19,6 +19,8 @@ remote同期の到達状況と測定値は [production実測](docs/production-ba
 [CPU検索例](https://pc-parts-catalog.kikuuuty.workers.dev/v1/search?category=cpu&q=9800x3d)）。
 Workers Paidへの変更後、全29,599製品のremote同期とdeploy、120件のHTTP順位比較を完了しました。
 最新の実測とlocal Phase 2との差5件の原因は [Paid / production検証結果](docs/production-paid-baseline.md) を参照してください。
+この派生FTS差はその後 [0006 forward migration](docs/fts-projection-consistency.md) で解消しました。
+現在は既存localのupgrade・fresh ingest・production remoteでFTS全29,599文書と120 queryのtop 20順が一致します。
 
 ## クイックスタート
 
