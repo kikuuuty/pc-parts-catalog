@@ -1,16 +1,16 @@
 import { getPlatformProxy } from 'wrangler';
+import { readRemoteConfig, remoteCredentials } from './remote-config.js';
 
 export async function openDatabase(remote = false) {
   if (!remote) {
-    const proxy = await getPlatformProxy({ configPath: 'wrangler.json', persist: { path: '.wrangler/state/v3' } });
+    const proxy = await getPlatformProxy({ configPath: 'wrangler.json', environment: 'local', persist: { path: '.wrangler/state/v3' } });
     return {
       async query(sql, params = []) { return proxy.env.DB.prepare(sql).bind(...params).all(); },
       close: () => proxy.dispose(),
     };
   }
-  const { CLOUDFLARE_ACCOUNT_ID: account, CLOUDFLARE_D1_DATABASE_ID: database, CLOUDFLARE_API_TOKEN: token } = process.env;
-  if (!account || !database || !token) throw new Error('Remote requires CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID and CLOUDFLARE_API_TOKEN');
-  if (!/^[a-f0-9]{32}$/i.test(account) || !/^[a-f0-9-]{36}$/i.test(database)) throw new Error('Invalid Cloudflare account/database ID');
+  const { config, database } = await readRemoteConfig();
+  const { account, token } = await remoteCredentials(config);
   return {
     async query(sql, params = []) {
       // Do not retry writes blindly: a lost response may have committed. Resume from DB hashes instead.

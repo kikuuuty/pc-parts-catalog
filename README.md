@@ -10,7 +10,15 @@ BuildCores OpenDB（Git commit固定）
   → Cloudflare D1（Wranglerローカル / リモート）
 ```
 
-検索CLI、SQL、INDEX検証を含みます。将来の別プロジェクトのAPIから、このD1を参照できます。
+検索CLI、SQL、INDEX検証と、同じ `searchQuery()` を使うread-only Worker APIを含みます。
+運用・API契約は [Cloudflare production手順](docs/cloudflare-production.md)、
+remote同期の到達状況と測定値は [production実測](docs/production-baseline.md) を参照してください。
+
+**本番API:** https://pc-parts-catalog.kikuuuty.workers.dev
+（[health](https://pc-parts-catalog.kikuuuty.workers.dev/v1/health) /
+[CPU検索例](https://pc-parts-catalog.kikuuuty.workers.dev/v1/search?category=cpu&q=9800x3d)）。
+Workers Paidへの変更後、全29,599製品のremote同期とdeploy、120件のHTTP順位比較を完了しました。
+最新の実測とlocal Phase 2との差5件の原因は [Paid / production検証結果](docs/production-paid-baseline.md) を参照してください。
 
 ## クイックスタート
 
@@ -205,8 +213,8 @@ npm run search -- --query-file examples/gpu-search.json --explain
 ### SQLを直接使う
 
 ```sh
-npx wrangler d1 execute DB --local --command "SELECT category,count(*) AS count FROM products WHERE active=1 GROUP BY category;"
-npx wrangler d1 execute DB --local --file examples/queries.sql
+npx wrangler d1 execute DB --local --env local --command "SELECT category,count(*) AS count FROM products WHERE active=1 GROUP BY category;"
+npx wrangler d1 execute DB --local --env local --file examples/queries.sql
 ```
 
 `examples/queries.sql` に、series/manufacturer/socket、7必須条件、FTS＋数値、型付きBETWEEN、
@@ -284,12 +292,25 @@ MPNそのものに全製品を跨ぐUNIQUE制約は設けません。
 ### DB作成
 
 ```sh
+npx wrangler whoami
+# 未認証の場合のみ
 npx wrangler login
-npx wrangler d1 create pc-parts-catalog --update-config=false
+npx wrangler d1 list --json
+# 同名DBが存在しない場合だけ作成。存在すれば再利用する。
+npx wrangler d1 create pc-parts-catalog --location=apac --update-config=false
+# wrangler.jsonのDB.database_idを取得した実UUIDへ設定してから確認
+npx wrangler d1 info pc-parts-catalog --json
 ```
 
-出力されたdatabase UUIDとCloudflareのaccount IDを控え、対象アカウントのD1編集権限を持つAPI Tokenを作成します。
-`wrangler.json` のUUIDはローカル用です。リモート用configは環境変数から `.cache/wrangler.remote.json` に生成します。
+**正式なremote bindingは `wrangler.json` の `DB`** です。実database UUIDとaccount IDを設定済みです。
+`env.local` のUUIDは既存ローカルD1の永続化キーを維持するための値で、remote resourceではありません。
+ローカル開発は `wrangler dev --local --env local` を使います。各npm script/ローカルCLIはこの環境を選択します。
+UUID/account IDはsecretではありません。
+
+管理CLIは既定でWrangler OAuth認証を利用できます。公式 `wrangler auth token --json` の出力を
+子プロセスからメモリ内で取得し、tokenをCLIのstdoutやartifactへ出さずD1 REST APIへアクセスします。
+CLI接続開始時に認証を取得し、長時間の処理で期限切れになったら同snapshotで再開します。
+既存のAPI token環境変数方式も引き続き使えます。
 
 PowerShell:
 
@@ -303,12 +324,45 @@ npm run sync -- --remote --dry-run
 npm run sync -- --remote
 ```
 
-Bashでは `export CLOUDFLARE_ACCOUNT_ID=...` の形式で同じ3変数を設定してください。
-CLIは環境変数を読みます。`.env` ファイルの自動読込は行いません。
+Bashでは `export CLOUDFLARE_ACCOUNT_ID=...` の形式で設定します。
+account/database IDは環境変数を省略すると `wrangler.json` を使用します。
+`CLOUDFLARE_D1_DATABASE_ID` によるCLI overrideを維持し、異なるUUIDのmigration時だけ
+`.cache/wrangler.remote.json` を生成します。Worker deployは正式bindingを使い、override不一致はpredeployで停止します。
+管理CLI自体は `.env` を読みません。Wranglerは自身の通常の認証・環境設定を使います。
 認証情報はcommitしないでください。ログにTokenを出力する処理はありません。
 
 `search`、`stats`、`verify:plans` も `--remote` に対応しています。
 遠隔同期はD1 REST APIを使用し、migration/DB作成/ローカルD1管理にはWranglerを使用します。
+Worker runtimeは `env.DB.prepare(...).bind(...).all()` を使用し、管理CLIのtokenは不要です。
+
+```sh
+npx wrangler d1 migrations list DB --remote
+npm run db:migrate -- --remote
+npm run stats -- --remote --output .cache/stats-remote.json
+npm run benchmark:search -- --remote --summary-only --output .cache/search-remote-phase2.json
+```
+
+### Worker API
+
+```sh
+npm run worker:dev
+# 自動検証では起動→120件HTTP比較→自分で起動したプロセス終了までを時間制限付きで行う
+npm run verify:worker:local
+# 全件remote同期と品質確認が完了してから
+npm run worker:deploy
+```
+
+|Endpoint|用途|
+|---|---|
+|`GET /v1/health`|軽量D1接続確認|
+|`GET /v1/categories`|model由来のカテゴリ一覧|
+|`GET /v1/search?category=cpu&q=9800x3d&limit=20&offset=0`|簡易検索|
+|`POST /v1/search`|JSONによるfilters/ranges/facets/identifier/orderBy付き検索|
+
+公開APIは既定20件、最大50件、先頭1,000件までのoffset paginationです。
+GETは短い60秒cache header、POSTはno-store。public read-onlyとしてCORS `*`、credentialなし。
+入力上限・レスポンス形式・エラー・観測方法・HTTP検証コマンドは
+[APIと運用の詳細](docs/cloudflare-production.md#api-v1)を参照してください。
 
 ### D1 Freeの初回インポート
 

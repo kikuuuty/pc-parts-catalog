@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { defaultRepo, fetchUpstream, loadSnapshot } from './upstream.js';
 import { openDatabase } from './database.js';
+import { readRemoteConfig } from './remote-config.js';
 import { syncSnapshot } from './sync.js';
 import { searchQuery, verifyPlans } from './queries.js';
 import { createHash } from 'node:crypto';
@@ -77,15 +78,17 @@ async function main() {
   if (command === 'migrate') {
     let config = 'wrangler.json';
     if (args.remote) {
-      const id = process.env.CLOUDFLARE_D1_DATABASE_ID;
-      if (!id || !/^[a-f0-9-]{36}$/i.test(id)) throw new Error('Set CLOUDFLARE_D1_DATABASE_ID to the remote D1 UUID');
-      const remote = JSON.parse(await readFile(config, 'utf8'));
-      remote.d1_databases[0].database_id = id;
-      remote.d1_databases[0].migrations_dir = path.resolve('migrations');
-      config = '.cache/wrangler.remote.json';
-      await writeFile(config, JSON.stringify(remote, null, 2));
+      const { config: remote, database } = await readRemoteConfig();
+      const binding = remote.d1_databases.find(db => db.binding === 'DB');
+      if (binding.database_id !== database) {
+        binding.database_id = database;
+        binding.migrations_dir = path.resolve(binding.migrations_dir ?? 'migrations');
+        if (remote.main) remote.main = path.resolve(remote.main);
+        config = '.cache/wrangler.remote.json';
+        await writeFile(config, JSON.stringify(remote, null, 2));
+      }
     }
-    execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'd1', 'migrations', 'apply', 'DB', args.remote ? '--remote' : '--local', '--config', config], { stdio: 'inherit', env: { ...process.env, CI: 'true' } });
+    execFileSync(process.execPath, ['node_modules/wrangler/bin/wrangler.js', 'd1', 'migrations', 'apply', 'DB', args.remote ? '--remote' : '--local', '--env', args.remote ? '' : 'local', '--config', config], { stdio: 'inherit', env: { ...process.env, CI: 'true' } });
     return;
   }
   if (command === 'inspect') {
@@ -105,7 +108,7 @@ async function main() {
         dryRun: args['dry-run'], maxProducts: positiveInteger(args['max-products'], args.remote ? 1000 : Infinity),
         writeBudget: positiveInteger(args['write-budget'], args.remote ? 80_000 : Infinity), maxDeleteFraction,
       });
-      await writeFile('.cache/sync-report.json', JSON.stringify(result, null, 2));
+      await writeFile(args.output ?? '.cache/sync-report.json', JSON.stringify(result, null, 2));
       print(result);
       if (result.status === 'partial') console.log('Partial sync: rerun with the same --repo snapshot to resume. On Free, wait for the next UTC day when the daily budget is exhausted.');
     } else if (command === 'search') {
@@ -118,7 +121,7 @@ async function main() {
       print(await db.query(args.explain ? `EXPLAIN QUERY PLAN ${query.sql}` : query.sql, query.params));
     } else if (command === 'plans') {
       const reports = await verifyPlans(db);
-      await writeFile('.cache/query-plans.json', JSON.stringify(reports, null, 2));
+      await writeFile(args.output ?? '.cache/query-plans.json', JSON.stringify(reports, null, 2));
       print(reports.map(r => ({ name: r.name, passed: r.index_check, returned: r.returned, ...(args['summary-only'] ? {rows_read:r.meta?.rows_read,catalog_full_scan:r.catalog_full_scan} : {plan:r.plan}) })));
       if (reports.some(r => !r.index_check)) throw new Error('Expected index missing; inspect .cache/query-plans.json');
     } else {
@@ -127,7 +130,7 @@ async function main() {
       const integrity = await db.query('PRAGMA foreign_key_check');
       const lastRun = await db.query('SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1');
       const stats = { counts: counts.results, identifiers: identifiers.results, foreign_key_errors: integrity.results, size_bytes: counts.meta?.size_after ?? null, last_run: lastRun.results };
-      await writeFile('.cache/stats.json', JSON.stringify(stats, null, 2));
+      await writeFile(args.output ?? '.cache/stats.json', JSON.stringify(stats, null, 2));
       print(stats);
     }
   } finally { await db.close(); }
