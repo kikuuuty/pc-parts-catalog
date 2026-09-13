@@ -10,6 +10,7 @@ import { createWorker } from '../src/worker.js';
 import { remoteDatabaseId, remoteCredentials } from '../src/remote-config.js';
 import { searchCacheKey, searchCachePolicy } from '../src/search-cache.js';
 import { fakeLimiters } from '../test-support/rate-limiter.js';
+import { assertCategories, assertSearchContract, assertPublicHeaders } from '../scripts/lib/api-contract.js';
 
 async function setup(t, options = {}) {
   const db = database();
@@ -40,6 +41,29 @@ async function setup(t, options = {}) {
   return { db, logs, statements, worker, env, request };
 }
 const post = value => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+
+test('consumer contract: categories, stable product keys, attribution, pagination, CORS and GET/POST parity', async t => {
+  const { request } = await setup(t);
+  const categoriesResponse = await request('/v1/categories');
+  assertPublicHeaders(categoriesResponse);
+  assertCategories(await categoriesResponse.json());
+  for (const offset of [0, 20, 60, 980]) {
+    const input = { category: 'memory', keyword: 'ddr5', limit: 20, offset };
+    const get = await request(`/v1/search?category=memory&q=ddr5&limit=20&offset=${offset}`);
+    assert.equal(get.status, 200); assertPublicHeaders(get);
+    const body = await get.json();
+    assertSearchContract(body, input);
+    const advanced = await request('/v1/search', post(input));
+    assert.equal(advanced.status, 200); assertPublicHeaders(advanced);
+    assert.deepEqual(await advanced.json(), body);
+    const broken = structuredClone(body); delete broken.meta.source.attribution;
+    assert.throws(() => assertSearchContract(broken, input));
+  }
+  const options = await request('/v1/search', { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } });
+  assert.equal(options.status, 204); assertPublicHeaders(options);
+  assert.equal(options.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
+  assert.equal((await request('/v1/search', { method: 'PUT' })).status, 405);
+});
 
 test('Worker health/categories and GET models execute the shared searchQuery on a real migrated database', async t => {
   const { request, db, statements, logs } = await setup(t);

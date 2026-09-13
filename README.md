@@ -30,6 +30,10 @@ cache HIT後・D1直前のRate Limitingも導入しました。通常mixedの429
 broad 29 query合計を48.80%削減しました。120 Goldenのtop20一致、CPU実測とFree再試算は
 [broad query read最適化](docs/broad-query-read-optimization.md)を参照してください。
 
+週次/手動の **sync → integrity/Golden gate → cache epoch → deploy → production検証** は
+[catalog release pipeline](docs/catalog-release.md) に統合しました。epochのGit編集は不要です。
+次フェーズの見積もりサイトからの利用は [consumer API契約](docs/cloudflare-production.md#frontend-integration-quick-reference) を参照してください。
+
 ## クイックスタート
 
 必要環境: **Node.js 24.x、npm、Git**。ローカル実行にはCloudflareアカウントは不要です。
@@ -370,7 +374,7 @@ npm run worker:deploy
 |`POST /v1/search`|JSONによるfilters/ranges/facets/identifier/orderBy付き検索|
 
 公開APIは既定20件、最大50件、先頭1,000件までのoffset paginationです。
-GET検索は標準20件・先頭6ページをCache APIで300秒edge cacheします。同期完了後はcatalog epoch varを更新してdeployします。
+GET検索は標準20件・先頭6ページをCache APIで300秒edge cacheします。同期後のepoch適用とdeployはrelease pipelineが行います。
 browser向けGET/POST検索はno-store。public read-onlyとしてCORS `*`、credentialなし。
 入力上限・レスポンス形式・エラー・観測方法・HTTP検証コマンドは
 [APIと運用の詳細](docs/cloudflare-production.md#api-v1)を参照してください。
@@ -408,17 +412,18 @@ sync reportのrows_read/writtenは状態比較と取込処理の観測値で、�
 |種別|名前|値|
 |---|---|---|
 |Secret|`CLOUDFLARE_ACCOUNT_ID`|アカウントID|
-|Secret|`CLOUDFLARE_API_TOKEN`|対象アカウントのD1編集Token|
+|Secret|`CLOUDFLARE_API_TOKEN`|対象アカウントのD1 Edit + Workers Scripts Edit Token|
 |Variable|`CLOUDFLARE_D1_DATABASE_ID`|作成済みD1のUUID|
 
 `.github/workflows/sync.yml`:
 
 - 毎週月曜日 **03:17 UTC（12:17 JST）**。
 - `workflow_dispatch` 手動実行。commit/ref、件数上限、書込予算を指定可能。
-- 上流全件検証 → migration → 差分同期。
-- concurrencyで本番同期を直列化。実行中の同期を自動キャンセルしません。
-- commit・件数・残件・状態はJob Summaryとartifactに保存。`partial` はインポート未完了です。
-- 初回を進める際は、手動実行の `upstream_ref` に同じcommitを指定し、翌UTC日に再開します。
+- immutable pin保存 → 上流全件検証 → migration状態確認 → 差分同期 → integrity/Golden gate → epoch適用 → deploy → production smoke/contract。
+- concurrencyで全releaseを直列化し、品質検証から事後確認までD1 leaseでsync writerを排除します。
+- commit・sync ID・件数・epoch・Golden・Worker version・事後検証はSummary/artifactに保存。`partial` はdeploy停止です。
+- retryは元のpinとcompleted syncを再利用。既定予算はPaid production向け10,000製品/2,000,000 writes。
+- 必要な設定と復旧手順は [release運用](docs/catalog-release.md)。schema migrationは自動適用せず別途reviewします。
 
 `.github/workflows/ci.yml` はpush/PR時にテスト、ローカルmigration、調査commitの全件取込、INDEX検証を実行します。
 このCIにCloudflare認証情報は不要です。

@@ -19,7 +19,8 @@ export function declaredIdentifierTypes(sql) {
 }
 
 export async function catalogState(db) {
-  const running = (await db.query('SELECT owner FROM sync_lock WHERE expires_at>unixepoch()')).results;
+  // Administrative release gates may hold the same writer-exclusion lease.
+  const running = (await db.query('SELECT owner FROM sync_lock WHERE expires_at>unixepoch()')).results.filter(r => r.owner !== db.releaseOwner);
   if (running.length) throw new Error('Catalog is being synchronized. Run quality measurements after sync finishes.');
   return (await db.query('SELECT id,source_commit,normalization_version,status,started_at,finished_at FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0] ?? null;
 }

@@ -1,5 +1,8 @@
 # Cloudflare D1 / Worker production運用
 
+通常のsync→epoch→deployは [catalog release自動化](catalog-release.md) を利用する。
+consumer向け基本契約は本documentの [API v1](#api-v1)。
+
 最新の全量同期・deploy・実HTTP検証は [production-paid-baseline.md](production-paid-baseline.md)。
 現在のGET cache設計・最新deploy・D1 read削減実測は [production-cache.md](production-cache.md)。
 最新のD1 MISS/POST Rate Limiting・deploy・stampedeの未達事項は [production-rate-limiting.md](production-rate-limiting.md)。
@@ -175,12 +178,11 @@ npx wrangler deploy --env="" --dry-run --outdir .cache/worker-build
 npm run worker:deploy
 ```
 
-`worker:deploy` は `scripts/worker-predeploy.js` → `wrangler deploy --env=""`（root production環境を明示）。
-実UUID、binding、CLI overrideとの一致、migration履歴、latest sync=complete、active>0、FKエラーなし、live leaseなしを確認する。
-productionの4 rate-limit binding名/namespace/thresholdとcatalog cache epoch/TTLも検証する。
-predeployはread-only。1つでも失敗するとdeployへ進まない。品質benchmarkは別途上記手順で確認する。
-手動で `npx wrangler deploy --env=""` を直接使う場合も、先に同じpredeployと品質確認を行う。
-同期がpartialの状態では本番公開しない。
+`worker:deploy` は `npm run check` → `scripts/catalog-release.js deploy`。
+completed sync由来epochを自動設定し、release lease内でreadiness/FTS/integrity、37 plans、
+固定120 Golden gate、config dry-run、Worker deploy、production smoke/contract/Goldenを実行する。
+`scripts/worker-predeploy.js` は共有readiness gateのread-only入口として残す。
+詳しいretry、設定保全、rollback手順は [release運用](catalog-release.md)。
 
 deploy出力の実workers.dev URLで検証する（下記は今回公開したURL）。
 
@@ -195,6 +197,40 @@ baseline指定時は保存済みbenchmarkのtop 10順とも一致を要求する
 同時syncや、同期経由でない手動補完を避けて測定する。
 
 ## API v1
+
+### Frontend integration quick reference
+
+- Base URL: **`https://pc-parts-catalog.kikuuuty.workers.dev`**。認証不要、credentialsなし。
+- `GET /v1/categories` → `{"categories":["cpu","memory","motherboard","gpu","storage","psu","case","case_fan","cpu_cooler"]}`。
+  UIはここからcategoryを取得する。category labelの表示方法はconsumer側で決められる。
+- 基本形: `/v1/search?category=cpu&q=9800x3d&limit=20&offset=0`。
+  `URLSearchParams`でencodeする。GETは`category`必須、`q`任意、`limit`既定20/最大50、`offset`既定0。
+  同じparameterの重複、未知parameter、空文字qは400。q省略はcategory一覧。
+- `data`と`meta`を読む。`meta.returned`は今回の件数で総hit数ではない。
+  次ページは同条件/limitの`meta.next_offset`を使い、nullなら停止する。
+  `has_more=true`でも1,000件windowに達すると`next_offset=null`になる。
+- 製品参照には`upstream_key`（上流category/UUID）を保存する。UUID単体はcategory間重複があり、
+  `id`はこのDB内だけで安定する。inactive化やcategory移動を跨ぐ永久存在保証はない。
+  未知specはnull。spec queryはsoft boostで、下位結果まで必ず条件を満たす保証はない。
+- `meta.source`のname/url/license/license_url/attributionをユーザーが確認できる場所へ表示する。
+- 検索はGET/POSTともbrowser向け`no-store`。`X-Cache`、`X-Cache-TTL`、`Age`はedge cacheの観測用。
+  `X-Request-ID`は障害照会用。これらをUIの正しさや永続キャッシュのversionとして使わない。
+- CORSは`*`。POSTは`Content-Type: application/json`でpreflightされる。credential/custom認証headerは不要。
+
+Frontend retry policy:
+
+|応答|扱い|
+|---|---|
+|200、data=[]|正常な検索結果0件。障害扱いでretryしない。|
+|400 / 404 / 405 / 413 / 415|入力・endpoint・method・bodyを修正。同じrequestを自動retryしない。|
+|429|`Retry-After`を尊重し、同時検索を減らしてbounded retry。即時ループしない。|
+|503 / 502 / 504 / network error|GETとread-only POST検索はbounded exponential backoff＋jitterでretry可能。Retry-Afterがあれば優先。|
+|500|連続retryで隠さずエラー表示・request ID記録。利用者による再試行は可能。|
+
+検索入力をdebounceし、古いin-flight requestをAbortControllerで破棄する。
+上限回数/待機時間に達したら一時エラーとして表示する。失敗を製品0件へ変換しない。
+同期を跨ぐpaginationで重複/欠落を検知したら先頭から再検索する。
+価格・販売店在庫・BIOS/物理干渉まで含む互換性判定はこのAPI契約に含まれない。
 
 ### Endpoints
 
@@ -329,8 +365,9 @@ parameter順、default値、encoding、q前後空白だけをcanonical化する�
 検索のbrowser-facing responseはGET/POSTとも `Cache-Control: no-store`。Cache API保存responseだけ `public, max-age=300`。
 categoriesの60秒HTTP headerは維持し、Cache APIには入れない。health、OPTIONS、全errorも保存しない。
 
-同期完了後は `wrangler.json` の `CATALOG_CACHE_EPOCH` を新しい完了sync ID/serialへ更新し、通常gate経由でdeployする。
-requestごとのD1 version取得やKVは使わない。epoch更新は手動で、自動sync/deploy連携は未実装。
+同期完了後の `CATALOG_CACHE_EPOCH` は [release pipeline](catalog-release.md) がcompleted sync IDと
+FTS/cache generationから決定し、一時deploy configへ適用する。Git上のepoch編集は不要。
+requestごとのD1 version取得やKVは使わない。
 更新を忘れた場合も各entryは保存時点から最大300秒で失効する。HITでTTLを延長せず、stale responseも返さない。
 詳細なTTL比較・同期後手順・stampede制約は [cache運用](production-cache.md) を参照。
 
@@ -352,10 +389,7 @@ Insightsはexperimentalの診断手段で、アプリの正しさや運用制御
 
 ## GitHub Actions
 
-既存CIのtest/schema check/local migration/全件sync/query plan/120 benchmarkを維持する。
-`.github/workflows/sync.yml` の既存週次同期・手動resumeも維持する。初回同期中は同commitを指定して手動resumeし、
-週次main更新と競合させない。CIにWorker自動production deployは追加していない。
-
-将来deployを自動化する場合は `CLOUDFLARE_API_TOKEN`（Worker deploy＋D1権限）と
-`CLOUDFLARE_ACCOUNT_ID` をGitHub Secretsへ置く。DB UUIDはconfigを使い、既存Variable overrideを使うなら同じUUIDにする。
-workflowへsecret値を直書きせず、完全同期/品質確認後に `npm run worker:deploy` を実行する。
+CIはtest/schema/local migration/全件syncに加え、共有release gateでplansと120 Goldenをfail-closedに評価する。
+`.github/workflows/sync.yml` は週次/手動のpin→sync→検証→epoch→deploy→production検証を実行する。
+既存名のCloudflare tokenにD1 EditとWorkers Scripts Editが必要。設定、retry、予算、
+production変更記録は [catalog release運用](catalog-release.md) を参照。

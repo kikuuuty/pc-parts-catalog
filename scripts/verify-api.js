@@ -8,6 +8,8 @@ import { catalogState, assertCatalogState } from '../src/quality/catalog.js';
 import { categories } from '../src/model.js';
 import { setTimeout as delay } from 'node:timers/promises';
 import { classifySearchCost } from '../src/search-protection.js';
+import { verifyProduction } from './lib/production-smoke.js';
+import { safeDatabase } from './lib/release-gates.js';
 
 const { values: args } = parseArgs({ options: {
   url: { type: 'string' }, remote: { type: 'boolean', default: false }, rounds: { type: 'string', default: '3' },
@@ -15,6 +17,7 @@ const { values: args } = parseArgs({ options: {
   'direct-only': { type: 'boolean', default: false }, 'allow-partial': { type: 'boolean', default: false },
   'cache-repeat': { type: 'boolean', default: false }, 'golden-only': { type: 'boolean', default: false },
   paced: { type: 'boolean', default: false },
+  smoke: { type: 'boolean', default: false },
 } });
 if (!args.url && !args['direct-only']) throw new Error('Provide --url http://127.0.0.1:8787 or the deployed HTTPS origin; use --remote to compare remote D1');
 if (args['direct-only'] && (args.url || args.golden || args.baseline)) throw new Error('--direct-only cannot be combined with URL/Golden API comparison');
@@ -24,6 +27,16 @@ const origin = args.url ? new URL(args.url) : null;
 if (origin && (origin.username || origin.password || origin.search || origin.hash || origin.pathname !== '/' || !['http:', 'https:'].includes(origin.protocol))) throw new Error('--url must be an HTTP(S) origin without credentials');
 if (origin && origin.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(origin.hostname)) throw new Error('Use HTTPS for production');
 const rounds = Number(args.rounds);
+if (args.smoke) {
+  const db = safeDatabase(await openDatabase(args.remote));
+  try {
+    const report = await verifyProduction(db, args.url, { golden: args.golden });
+    await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
+    console.log(JSON.stringify(report));
+  } catch { console.error('API smoke/contract verification failed'); process.exitCode = 1; }
+  finally { await db.close(); }
+  process.exit(process.exitCode ?? 0);
+}
 if (!Number.isInteger(rounds) || rounds < 2 || rounds > 10) throw new Error('--rounds must be 2–10');
 const cases = [
   ['cpu', '9800x3d'], ['cpu', '14900k'], ['gpu', 'rtx5080'], ['gpu', 'rtx 5080'], ['cpu', 'ryzen 7'],

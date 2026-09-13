@@ -62,7 +62,7 @@ try {
   }
   if (interrupted) throw new Error('Verification interrupted');
   console.log('Worker ready. Running paced HTTP/direct-D1 comparison including all 120 Golden Queries (deadline 600s).');
-  verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--golden', '--paced', '--output', '.cache/api-local-production.json'], {
+  verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--smoke', '--golden', '--paced', '--output', '.cache/api-local-production.json'], {
     stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
   });
   const exit = await new Promise((resolve, reject) => {

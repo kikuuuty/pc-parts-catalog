@@ -354,3 +354,7 @@ Deploy履歴: 最初の300秒 `18410638-f40b-4bf1-bda3-499c98430949` → 60秒 `
 
 Contains information from [BuildCores OpenDB](https://github.com/buildcores/buildcores-open-db),
 made available under [ODC-By 1.0](https://opendatacommons.org/licenses/by/1-0/).
+# 現在の同期後運用
+
+epochの手動編集は [catalog release pipeline](catalog-release.md) に置き換わりました。
+以下の計測値・cache設計はそのまま保持し、同期後の実行手順はrelease documentを参照してください。

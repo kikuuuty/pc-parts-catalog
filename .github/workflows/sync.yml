@@ -1,39 +1,42 @@
-name: Sync BuildCores catalog
+name: Sync and release production catalog
 on:
   schedule:
     - cron: '17 3 * * 1'
   workflow_dispatch:
     inputs:
       upstream_ref:
-        description: 'Upstream ref or commit (pin the same commit to resume an initial import)'
+        description: 'Upstream ref/commit (resolved once; retries retain the immutable pin)'
         default: main
         type: string
       max_products:
-        description: 'Maximum changed/deleted products for this run'
-        default: '1000'
+        description: 'Maximum changed/deleted products; partial sync blocks deploy'
+        default: '10000'
         type: string
       write_budget:
-        description: 'Run-local D1 row-write budget, below remaining daily Free allowance'
-        default: '80000'
+        description: 'Run-local D1 row-write budget (Workers Paid production)'
+        default: '2000000'
         type: string
 
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: catalog-production-sync
   cancel-in-progress: false
 
 jobs:
-  sync:
+  release:
+    # Production credentials must only execute the reviewed default branch.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
-      MAX_PRODUCTS: ${{ inputs.max_products || '1000' }}
-      WRITE_BUDGET: ${{ inputs.write_budget || '80000' }}
+      MAX_PRODUCTS: ${{ inputs.max_products || '10000' }}
+      WRITE_BUDGET: ${{ inputs.write_budget || '2000000' }}
       WRANGLER_SEND_METRICS: 'false'
     steps:
       - uses: actions/checkout@v4
@@ -42,23 +45,38 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
-      - run: npm run check
-      - name: Fetch a single immutable snapshot
-        run: npm run upstream:fetch -- --ref "$UPSTREAM_REF"
-      - name: Validate the entire snapshot before remote writes
-        run: npm run upstream:inspect
-      - run: npm run db:migrate -- --remote
-      - name: Resume incremental sync from D1 hashes
-        run: npm run sync -- --remote --max-products "$MAX_PRODUCTS" --write-budget "$WRITE_BUDGET"
-      - name: Job summary
-        if: always()
-        run: node scripts/action-summary.js
-      - uses: actions/upload-artifact@v4
-        if: always()
+      # check includes schema:check AND npm test, including search/contract tests.
+      - name: Local tests and schema generator
+        run: npm run check
+      - name: Restore original snapshot pin on retry
+        if: github.run_attempt > 1
+        uses: actions/download-artifact@v4
         with:
-          name: catalog-sync-reports
+          name: catalog-snapshot-pin
+          path: .cache
+      - name: Resolve immutable upstream snapshot
+        run: node scripts/catalog-release.js pin
+      - name: Persist pin before any production write
+        if: github.run_attempt == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-snapshot-pin
+          path: .cache/release-pin.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Production sync and completion verification
+        run: npm run release:sync
+      - name: Readiness, integrity, Golden gate, deploy and production verification
+        # One process holds the D1 writer-exclusion lease across ALL these
+        # phases. Named phase logs/summary identify the precise failed phase.
+        run: node scripts/catalog-release.js deploy
+      - name: Release summary artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-release-attempt-${{ github.run_attempt }}
           path: |
-            .cache/inspection.json
+            .cache/release-*.json
             .cache/sync-report.json
             .cache/notices/
           retention-days: 30

@@ -20,11 +20,11 @@ jobs:
       - name: Validate and import pinned real upstream snapshot
         run: npm run upstream:fetch -- --ref eec0df175504ebd15f0f3e3a8249a18a22f00940
       - run: npm run sync
-      - run: npm run verify:plans
       - run: npm run stats
       - run: npm run audit:completeness -- --output .cache/completeness.json
       - run: npm run audit:duplicates -- --output .cache/duplicates.json
-      - run: npm run benchmark:search -- --output .cache/search-benchmark.json
+      - name: Enforce production Golden floors and dry-run release config
+        run: npm run release:verify -- --local
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -32,8 +32,7 @@ jobs:
           path: |
             .cache/inspection.json
             .cache/sync-report.json
-            .cache/query-plans.json
             .cache/completeness.json
             .cache/duplicates.json
-            .cache/search-benchmark.json
+            .cache/release-verify-report.json
           retention-days: 7

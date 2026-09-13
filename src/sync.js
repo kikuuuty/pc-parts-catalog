@@ -20,7 +20,7 @@ export function ingestionStatement(records, owner) {
   };
 }
 
-export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, writeBudget = Infinity, dryRun = false, maxDeleteFraction = 0.2 } = {}) {
+export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, writeBudget = Infinity, dryRun = false, maxDeleteFraction = 0.2, reuseComplete = false, baseSyncId } = {}) {
   const owner = randomUUID();
   let acquired = false;
   let started = false;
@@ -39,6 +39,10 @@ export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, write
       const lock = count(await db.query('INSERT INTO sync_lock(id,owner,expires_at) VALUES(1,?,unixepoch()+900) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at WHERE sync_lock.expires_at<=unixepoch() RETURNING owner', [owner]));
       if (lock.results[0]?.owner !== owner) throw new Error('Another sync holds the database lease');
       acquired = true;
+      if (baseSyncId !== undefined) {
+        const latest = (await db.query('SELECT id,source_commit FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0];
+        if ((latest?.id ?? null) !== baseSyncId && latest?.source_commit !== snapshot.commit) throw new Error('Pinned sync superseded by a different catalog snapshot');
+      }
       count(await db.query("UPDATE sync_runs SET status='failed',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),error='Previous process ended without finalizing; exclusive lease has been recovered' WHERE status='running'"));
     }
     const state = await readState({ query: async (sql, params) => count(await db.query(sql, params)) });
@@ -53,6 +57,14 @@ export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, write
       if (active && removed / active > maxDeleteFraction) throw new Error(`Deletion fraction for ${category}: ${removed}/${active} exceeds ${maxDeleteFraction}`);
     }
     if (dryRun) return { ...report, status: 'dry-run' };
+    // Workflow retries reuse the completed snapshot identity, under the writer
+    // lease and after comparing actual product hashes (including lost writes).
+    if (reuseComplete && !plan.changed.length && !plan.deleted.length) {
+      const latest = (await db.query('SELECT id,source_commit,normalization_version,status FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0];
+      if (latest?.status === 'complete' && latest.source_commit === snapshot.commit && latest.normalization_version === NORMALIZER_VERSION) {
+        return { ...report, run_id: latest.id, status: 'complete', reused: true };
+      }
+    }
     count(await db.query("INSERT INTO sync_runs(id,source_commit,normalization_version,status,started_at) VALUES(?,?,?,'running',strftime('%Y-%m-%dT%H:%M:%fZ','now'))", [owner, snapshot.commit, NORMALIZER_VERSION]));
     started = true;
     let processed = 0;
