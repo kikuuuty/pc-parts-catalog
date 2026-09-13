@@ -75,6 +75,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: catalog-release-attempt-${{ github.run_attempt }}
+          # Multi-path globbing starts at .cache, which is a hidden directory.
+          include-hidden-files: true
+          # A successful release must leave artifacts; early failures may not.
+          if-no-files-found: ${{ job.status == 'success' && 'error' || 'warn' }}
           path: |
             .cache/release-*.json
             .cache/sync-report.json

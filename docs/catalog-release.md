@@ -200,6 +200,12 @@ observable contract, not independently collected billing/tail metadata.
 |429 / cache race|Bounded paced recovery as above; unresolved checks fail. Never weaken rate thresholds.|
 
 The completed pin is retained for 90 days; summary artifacts for 30 days.
+The summary upload explicitly enables `include-hidden-files` because its
+multi-path glob starts at the hidden `.cache` directory. Only the listed release
+JSON, sync report and notices paths are selected, not the whole cache directory.
+No matching files is an error when earlier steps succeeded, and a warning after
+an earlier failure (reports may not exist yet). `if: always()` preserves available
+failure reports. The single-file retry pin upload/download is unchanged.
 Console/Step Summary includes phase, sync ID, counts, completion time, epoch,
 Golden result, deployment status, previous/deployed Worker versions and smoke
 result. Reports are `.cache/release-*-report.json`, with

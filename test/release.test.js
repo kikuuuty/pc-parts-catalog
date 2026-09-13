@@ -30,6 +30,8 @@ test('actual CLI retry preserves immutable pin artifact separately from report a
   options.env.GITHUB_RUN_ID = 'another-run';
   await assert.rejects(promisify(execFile)(process.execPath, [path.resolve('scripts/catalog-release.js'), 'pin'], options));
   assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), pin);
+  // The always() artifact step must also have a report after a failed command.
+  assert.equal(JSON.parse(await readFile(path.join(directory, '.cache/release-pin-report.json'), 'utf8')).result, 'failed');
 });
 
 test('retry reuses completed sync only after comparing DB hashes; partial and failed writes resume', async t => {
