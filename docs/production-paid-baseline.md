@@ -1,5 +1,9 @@
 # Workers Paid / production API baseline — 2026-09-13
 
+> 以下は0006適用前のproduction baselineの履歴です。当時の5件の順位差は、その後
+> [0006 FTS projection consistency](fts-projection-consistency.md)で解消しました。
+> 現在はlocal upgraded / fresh / remoteの全FTS内容と120 queryのtop 20順が一致しています。
+
 ## 結果
 
 **同snapshotの全29,599製品をremote D1へ同期し、Workerをdeploy。本番HTTP経由の検索・性能検証を完了した。**

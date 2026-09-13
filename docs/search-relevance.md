@@ -33,6 +33,10 @@ CPU family限定の弱いfreshnessを追加した。候補取得の上限やNULL
 `family`には既存CPU family/generationとGPU chipset/chip_seriesを投影する。
 `text`は従来の検索文書（上流identifierを含む）と取込契約を維持する。
 
+0006でbackfill/ingestのフィールド投影を `product_search_projection` viewへ共通化した。
+Motherboard chipsetはlegacy textとPhase 2 typed検索に保持し、familyへは追加しない。
+全カテゴリのmapping・再現性検証は [FTS projection consistency](fts-projection-consistency.md) を参照。
+
 Phase 1の一致tierは以下。Phase 2では名称全体と名称phraseの間に、明確なfamily/chipset一致を追加する。
 各tierを逆転させない範囲でspec/manufacturer/freshnessのsignalも評価する。
 

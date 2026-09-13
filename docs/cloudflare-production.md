@@ -2,6 +2,7 @@
 
 最新の全量同期・deploy・実HTTP検証は [production-paid-baseline.md](production-paid-baseline.md)。
 初回Free/partial時点の履歴は [production-baseline.md](production-baseline.md)。
+派生FTSの現在の生成規則と0006適用結果は [FTS projection consistency](fts-projection-consistency.md)。
 検索SQL、ranking、Golden expected、カタログ正規化は既存Phase 2を共有する。
 
 ## 認証・bindingの責務
@@ -53,7 +54,8 @@ npx wrangler d1 migrations list DB --remote
 npx wrangler d1 execute DB --remote --command "SELECT name,type FROM sqlite_schema ORDER BY type,name; SELECT * FROM d1_migrations ORDER BY id;"
 ```
 
-0001〜0005は既存ファイルをそのまま適用。適用済みmigrationはWranglerがskipする。
+0001〜0005はimmutableのまま、0006でFTSのbackfill/ingest投影を共通viewへ統一する。
+適用済みmigrationはWranglerがskipする。0006は元データの再同期を要求しない。
 products、全9 typed tables、identifiers view、両FTS、indexes、ingest/local identifier triggersを確認する。
 失敗時は対象migrationと状態を調べる。DB削除/再作成、Time Travel restore、全件削除による復旧は行わない。
 
@@ -129,10 +131,9 @@ SQL時間、query elapsed合計・p50/p95/max、top 10の `upstream_key` 順、c
 同じcomplete snapshotで順位差があれば非0終了する。DB内部IDや同期時刻が違うのでcatalog hash単独では一致判定しない。
 同commitでも独自identifier、欠落行、ID tie-breaker、FTS corpusの差を調べる。ranking/expectedを変更して合わせない。
 
-今回、期待製品順位/品質指標は全120件で一致したが、厳密top 10比較は5件の差を検出し非0終了した。
-原因は既存0004のバックフィルと取込triggerにおけるMotherboardのFTS `family` 投影差。
-この比較結果を成功へ書き換えず、[診断結果](production-paid-baseline.md#local-phase-2との厳密順位差)を記録している。
-公開APIと**同じremote DB**の比較は120/120でtop 20まで一致した。
+0006適用前は厳密top 10比較で5件の差があり、[当時の診断結果](production-paid-baseline.md#local-phase-2との厳密順位差)を履歴として保持している。
+0006適用後はlocal upgraded / fresh / remoteの全FTS内容と120 queryのtop 20順が一致した。
+数値のstrict比較・跨runtimeの微小浮動小数差・費用計測手順は[0006検証結果](fts-projection-consistency.md)を参照。
 
 `verify:api --direct-only` は主要11検索を既定3回ずつ、APIと同じLIMIT 21＋bound OFFSET 0で計測する。
 認証取得時間をquery latencyには含めない。SQL durationとREST往復を含むelapsedを分ける。
