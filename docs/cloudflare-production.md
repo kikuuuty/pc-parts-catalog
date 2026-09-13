@@ -1,6 +1,7 @@
 # Cloudflare D1 / Worker production運用
 
 最新の全量同期・deploy・実HTTP検証は [production-paid-baseline.md](production-paid-baseline.md)。
+現在のGET cache設計・最新deploy・D1 read削減実測は [production-cache.md](production-cache.md)。
 初回Free/partial時点の履歴は [production-baseline.md](production-baseline.md)。
 派生FTSの現在の生成規則と0006適用結果は [FTS projection consistency](fts-projection-consistency.md)。
 検索SQL、ranking、Golden expected、カタログ正規化は既存Phase 2を共有する。
@@ -310,20 +311,30 @@ public read-only catalogとしてCORS `*`、credentialsなし。OPTIONSはroute�
 将来は利用量に合わせ、CloudflareのWAF/Rate Limiting対応プラン・route上でpath/IP単位の制限を設定する。
 コード内の分散しない巨大rate limiterは実装していない。
 
-GET検索/categoriesは `Cache-Control: public, max-age=60, s-maxage=60`。
-POST、health、errorはno-store。Cache APIは未使用で、Workerの動的JSONがedgeで自動cacheされるとは仮定しない。
-GETのcache keyは完全なURL（category/q/limit/offset）。高度条件はPOSTのみなのでcacheしない。
-cache hitでは同期完了直後に最大約60秒の古い結果があり得る。長いstale-while-revalidateは指定しない。
+GET検索の200だけを `caches.default` で300秒edge cacheする。対象はlimit=20、offset=0/20/40/60/80/100。
+既存のAPI limit/offset上限は維持し、対象外pageは通常のD1検索を行う。
+keyはorigin＋cache schema version＋catalog epoch＋TTL＋category/q/limit/offset。
+parameter順、default値、encoding、q前後空白だけをcanonical化する。compact/spaced modelや内部空白は同一視しない。
+検索のbrowser-facing responseはGET/POSTとも `Cache-Control: no-store`。Cache API保存responseだけ `public, max-age=300`。
+categoriesの60秒HTTP headerは維持し、Cache APIには入れない。health、OPTIONS、全errorも保存しない。
 
-`X-Request-ID` と安全な `Server-Timing: d1;dur=...` を返す。
-Workerは構造化ログにroute、method、category、limit、offset、status、elapsed、rows_read/written、SQL durationだけを出す。
+同期完了後は `wrangler.json` の `CATALOG_CACHE_EPOCH` を新しい完了sync ID/serialへ更新し、通常gate経由でdeployする。
+requestごとのD1 version取得やKVは使わない。epoch更新は手動で、自動sync/deploy連携は未実装。
+更新を忘れた場合も各entryは保存時点から最大300秒で失効する。HITでTTLを延長せず、stale responseも返さない。
+詳細なTTL比較・同期後手順・stampede制約は [cache運用](production-cache.md) を参照。
+
+`X-Cache: HIT/MISS/BYPASS`、対象GETに `X-Cache-TTL`、HITに保存時点からの `Age` を返す。
+`X-Request-ID` はHITでも毎回新規、`Server-Timing: d1;dur=...` は今回D1を実行した場合だけ返す。
+Workerは構造化ログにroute、method、category、limit、offset、status、elapsed、rows_read/written、SQL duration、
+cache_status、d1_queries、cache障害時のboundedなcache_errorを出す。HITはd1_queries=0、rows_read=0。
 URL全文、keyword、filter値、SQL、stack、tokenはログに含めない。
 Wrangler observabilityは初期診断用にlog sampling=1、invocation_logs=false。利用増加後は費用・保持量に応じsamplingを調整する。
 Dashboard / `npx wrangler tail` でrequest IDを照合できる。health/categoriesやvalidation失敗に検索readを課さない。
 
 `verify:api` はHTTP応答本文までの時間を取り、nearest-rank p50/p95/max、初回/反復を分ける。
 Node fetchにbrowser cacheはなく、初回/反復はisolate cold/warmやcache hitの証明ではない。
-CF-Cache-Status/Ageも保存し、Cache API導入後はhit/miss別に評価する。
+CF-Cache-Status/Age/X-Cacheも保存する。`--golden --cache-repeat` は本文一致とGET HIT/POST BYPASSを検証する。
+production HIT/MISS別のWorker metadata測定は `scripts/measure-api-cache.js` のrequest ID/tail照合で行う。
 rows_read/writtenのdirect計測は比較用SQLの値。Worker側の値は構造化ログ/Insightsから別途確認し、同じものと断定しない。
 Insightsはexperimentalの診断手段で、アプリの正しさや運用制御に依存させない。
 

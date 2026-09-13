@@ -6,6 +6,10 @@
   "compatibility_date": "2026-09-12",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "vars": {
+    "CATALOG_CACHE_EPOCH": "sync-34aa2c91-d6eb-448b-8ece-05f027a156c2-fts6-cache1",
+    "SEARCH_CACHE_TTL_SECONDS": "300"
+  },
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "invocation_logs": false, "head_sampling_rate": 1 }
@@ -20,6 +24,10 @@
   ],
   "env": {
     "local": {
+      "vars": {
+        "CATALOG_CACHE_EPOCH": "local-fts6",
+        "SEARCH_CACHE_TTL_SECONDS": "300"
+      },
       "d1_databases": [
         {
           "binding": "DB",

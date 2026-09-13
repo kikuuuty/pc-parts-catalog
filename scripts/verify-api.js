@@ -11,10 +11,12 @@ const { values: args } = parseArgs({ options: {
   url: { type: 'string' }, remote: { type: 'boolean', default: false }, rounds: { type: 'string', default: '3' },
   golden: { type: 'boolean', default: false }, baseline: { type: 'string' }, output: { type: 'string', default: '.cache/api-verification.json' },
   'direct-only': { type: 'boolean', default: false }, 'allow-partial': { type: 'boolean', default: false },
+  'cache-repeat': { type: 'boolean', default: false }, 'golden-only': { type: 'boolean', default: false },
 } });
 if (!args.url && !args['direct-only']) throw new Error('Provide --url http://127.0.0.1:8787 or the deployed HTTPS origin; use --remote to compare remote D1');
 if (args['direct-only'] && (args.url || args.golden || args.baseline)) throw new Error('--direct-only cannot be combined with URL/Golden API comparison');
 if (args['allow-partial'] && !args['direct-only']) throw new Error('--allow-partial is only for diagnostic direct-D1 measurements');
+if ((args['cache-repeat'] || args['golden-only']) && !args.golden) throw new Error('Cache regression options require --golden');
 const origin = args.url ? new URL(args.url) : null;
 if (origin && (origin.username || origin.password || origin.search || origin.hash || origin.pathname !== '/' || !['http:', 'https:'].includes(origin.protocol))) throw new Error('--url must be an HTTP(S) origin without credentials');
 if (origin && origin.protocol !== 'https:' && !['127.0.0.1', 'localhost', '[::1]'].includes(origin.hostname)) throw new Error('Use HTTPS for production');
@@ -31,7 +33,7 @@ const distribution = values => {
   return { count: sorted.length, p50: p(0.5), p95: p(0.95), max: p(1) };
 };
 const report = { generated_at: new Date().toISOString(), origin: origin?.origin ?? null, direct: args.remote ? 'remote D1 REST' : 'local D1 binding',
-  cache: 'HTTP headers only; Node fetch has no browser cache, no Cache API implemented. First/repeat is not proof of isolate cold/warm.', samples: [], golden: [] };
+  cache: 'Node fetch has no browser cache. X-Cache observes the application Cache API; D1 costs here are remote direct, not Worker metadata.', samples: [], golden: [] };
 const request = async (path, init) => {
   const started = performance.now();
   const response = await fetch(new URL(path, origin), { ...init, signal: AbortSignal.timeout(60_000) });
@@ -41,7 +43,7 @@ const request = async (path, init) => {
   assert.match(response.headers.get('content-type') ?? '', /application\/json/i, `Non-JSON response at ${path.split('?')[0]} (CF-Ray ${response.headers.get('cf-ray') ?? 'unknown'})`);
   const body = JSON.parse(text);
   return { body, elapsed_ms, request_id: response.headers.get('x-request-id'), cf_cache_status: response.headers.get('cf-cache-status'),
-    age: response.headers.get('age'), server_timing: response.headers.get('server-timing') };
+    cache_status: response.headers.get('x-cache'), age: response.headers.get('age'), server_timing: response.headers.get('server-timing') };
 };
 const apiSearch = item => item.search ? request('/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...item.search, category: item.category, keyword: item.query, limit: 20 }) })
   : request(`/v1/search?${new URLSearchParams({ category: item.category, q: item.query, limit: '20' })}`);
@@ -56,7 +58,7 @@ try {
     assert.deepEqual((await request('/v1/health')).body, { ok: true, database: 'available' });
     assert.deepEqual((await request('/v1/categories')).body.categories, categories);
   }
-  for (const item of cases) {
+  for (const item of args['golden-only'] ? [] : cases) {
     for (let round = 0; round < rounds; round++) {
       const query = searchQuery(item.category, { keyword: item.query, limit: 21 });
       const started = performance.now();
@@ -71,6 +73,7 @@ try {
       report.samples.push({ ...item, round, phase: round === 0 ? 'first' : 'repeat', direct_elapsed_ms,
         direct_meta: direct.meta, returned: Math.min(direct.results.length, 20), api_elapsed_ms: api?.elapsed_ms ?? null,
         request_id: api?.request_id ?? null, cf_cache_status: api?.cf_cache_status ?? null,
+        cache_status: api?.cache_status ?? null,
         age: api?.age ?? null, server_timing: api?.server_timing ?? null, top_results: (api?.body.data ?? direct.results).slice(0, 5) });
     }
   }
@@ -89,8 +92,23 @@ try {
       const direct = await db.query(query.sql, query.params);
       const api = await apiSearch(item);
       assert.deepEqual(ids(api.body.data), ids(direct.results), `Golden API ranking mismatch: ${item.id}`);
-      if (baseline) assert.deepEqual(ids(api.body.data.slice(0, 10)), ids(baseline.results.find(r => r.id === item.id).top_results), `Baseline top 10 mismatch: ${item.id}`);
-      report.golden.push({ id: item.id, elapsed_ms: api.elapsed_ms, top_10: ids(api.body.data.slice(0, 10)), matched: true });
+      let rank = null;
+      if (baseline) {
+        const expected = baseline.results.find(r => r.id === item.id);
+        assert.deepEqual(ids(api.body.data.slice(0, 10)), ids(expected.top_results), `Baseline top 10 mismatch: ${item.id}`);
+        rank = api.body.data.findIndex(row => expected.resolved_products.some(p => p.upstream_key === row.upstream_key)) + 1;
+        assert.equal(rank, expected.rank, `Expected product rank mismatch: ${item.id}`);
+      }
+      let repeat;
+      if (args['cache-repeat']) {
+        repeat = await apiSearch(item);
+        assert.deepEqual(repeat.body, api.body, `Cache response mismatch: ${item.id}`);
+        assert.equal(repeat.cache_status, item.search ? 'BYPASS' : 'HIT');
+        if (!item.search) assert.equal(repeat.server_timing, null);
+      }
+      report.golden.push({ id: item.id, elapsed_ms: api.elapsed_ms, request_id: api.request_id,
+        cache_status: api.cache_status, repeat_cache_status: repeat?.cache_status, repeat_request_id: repeat?.request_id,
+        rank, zero: api.body.data.length === 0, top_10: ids(api.body.data.slice(0, 10)), top_20: ids(api.body.data), matched: true });
     }
   }
   await assertCatalogState(db, initial);
@@ -108,6 +126,13 @@ try {
       rows_read: distribution(report.samples.filter(s => s.query === c.query).map(s => s.direct_meta?.rows_read)),
       returned: distribution(report.samples.filter(s => s.query === c.query).map(s => s.returned)),
     }])), golden_matched: report.golden.length,
+    golden_metrics: args.baseline && report.golden.length ? {
+      hit_at_1: report.golden.filter(r => r.rank > 0 && r.rank <= 1).length / report.golden.length,
+      hit_at_5: report.golden.filter(r => r.rank > 0 && r.rank <= 5).length / report.golden.length,
+      hit_at_10: report.golden.filter(r => r.rank > 0 && r.rank <= 10).length / report.golden.length,
+      mrr: report.golden.reduce((n, r) => n + (r.rank ? 1 / r.rank : 0), 0) / report.golden.length,
+      zero: report.golden.filter(r => r.zero).length,
+    } : null,
   };
   await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify({ output: args.output, partial_catalog: report.partial_catalog, ...report.summary }, null, 2));

@@ -1,5 +1,6 @@
 import { categories, models } from './model.js';
 import { searchQuery } from './queries.js';
+import { searchCachePolicy, searchCacheKey, readSearchCache, writeSearchCache } from './search-cache.js';
 
 const MAX_BODY = 16 * 1024;
 const MAX_WINDOW = 1000;
@@ -112,7 +113,7 @@ async function searchInput(request, url) {
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
 // No CLI, REST credentials, writes, SQL logging, or user-controlled SQL here.
-export function createWorker({ log = entry => console.log(JSON.stringify(entry)) } = {}) {
+export function createWorker({ log = entry => console.log(JSON.stringify(entry)), cache: injectedCache, now = Date.now } = {}) {
   return {
     async fetch(request, env) {
       const started = performance.now();
@@ -121,13 +122,18 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff', 'X-Request-ID': requestId,
         // Public, read-only catalog. Credentials and management routes are not supported.
-        'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Request-ID, Server-Timing',
+        'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Request-ID, Server-Timing, X-Cache, X-Cache-TTL, Age',
       });
-      const event = { event: 'catalog_api', request_id: requestId, route: 'unknown', method: request.method };
+      const event = { event: 'catalog_api', request_id: requestId, route: 'unknown', method: request.method,
+        cache_status: 'BYPASS', d1_queries: 0, rows_read: 0, rows_written: 0, sql_duration_ms: null };
       let status = 200;
       let payload;
+      let cachedBody;
       const execute = async (sql, params = []) => {
         if (!env.DB?.prepare) throw new Error('Missing binding');
+        event.d1_queries++;
+        // A failed query has unknown cost; only successful D1 metadata establishes it.
+        event.rows_read = event.rows_written = null;
         let result;
         try {
           result = await env.DB.prepare(sql).bind(...params).all();
@@ -167,20 +173,44 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
             payload = { categories };
             headers.set('Cache-Control', 'public, max-age=60, s-maxage=60');
           } else {
-            const { category, limit, offset, query } = validate(await searchInput(request, url));
+            const input = await searchInput(request, url);
+            const { category, limit, offset, query } = validate(input);
             Object.assign(event, { category, limit, offset });
-            const rows = await execute(query.sql, query.params);
-            const hasMore = rows.length > limit;
-            const nextOffset = hasMore && offset + 2 * limit <= MAX_WINDOW ? offset + limit : null;
-            payload = {
-              data: rows.slice(0, limit).map(row => ({
-                ...Object.fromEntries(productFields.map(key => [key, row[key] ?? null])),
-                specs: Object.fromEntries(Object.keys(models[category].fields).map(key => [key, row[key] ?? null])),
-              })),
-              meta: { limit, offset, returned: Math.min(rows.length, limit), has_more: hasMore, next_offset: nextOffset,
-                window_limit: MAX_WINDOW, window_exhausted: hasMore && nextOffset === null, source },
-            };
-            if (request.method === 'GET') headers.set('Cache-Control', 'public, max-age=60, s-maxage=60');
+            const policy = request.method === 'GET' ? searchCachePolicy(env, input) : null;
+            const cache = injectedCache ?? globalThis.caches?.default;
+            const key = policy && cache ? searchCacheKey(url, input, policy) : null;
+            if (key) {
+              event.cache_status = 'MISS';
+              headers.set('X-Cache-TTL', String(policy.ttl));
+              try {
+                const hit = await readSearchCache(cache, key, policy.ttl, now());
+                if (hit) {
+                  cachedBody = hit.body;
+                  event.cache_status = 'HIT';
+                  headers.set('Age', String(hit.age));
+                }
+              } catch { event.cache_status = 'BYPASS'; event.cache_error = 'match'; }
+            }
+            if (cachedBody === undefined) {
+              const rows = await execute(query.sql, query.params);
+              const hasMore = rows.length > limit;
+              const nextOffset = hasMore && offset + 2 * limit <= MAX_WINDOW ? offset + limit : null;
+              payload = {
+                data: rows.slice(0, limit).map(row => ({
+                  ...Object.fromEntries(productFields.map(key => [key, row[key] ?? null])),
+                  specs: Object.fromEntries(Object.keys(models[category].fields).map(key => [key, row[key] ?? null])),
+                })),
+                meta: { limit, offset, returned: Math.min(rows.length, limit), has_more: hasMore, next_offset: nextOffset,
+                  window_limit: MAX_WINDOW, window_exhausted: hasMore && nextOffset === null, source },
+              };
+              if (key) {
+                try {
+                  // Await the small write so a sequential request can immediately HIT.
+                  // Cache unavailability must never turn a successful search into 500.
+                  await writeSearchCache(cache, key, JSON.stringify(payload), policy.ttl, now());
+                } catch { event.cache_status = 'BYPASS'; event.cache_error = 'put'; }
+              }
+            }
           }
         }
       } catch (error) {
@@ -188,12 +218,15 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         const code = error instanceof HttpError ? error.code : 'INTERNAL_ERROR';
         payload = { error: { code, message: error instanceof HttpError ? error.message : 'Internal server error' }, request_id: requestId };
         event.error_code = code;
+        event.cache_status = 'BYPASS';
+        headers.delete('X-Cache-TTL');
         if (status === 503) headers.set('Retry-After', '30');
       }
       Object.assign(event, { status, elapsed_ms: Math.round((performance.now() - started) * 100) / 100 });
+      headers.set('X-Cache', event.cache_status);
       // Only bounded operational dimensions: never URL, keyword, filters, SQL, stack or secrets.
       try { log(event); } catch { /* Telemetry must not break the public response. */ }
-      return new Response(status === 204 ? null : JSON.stringify(payload), { status, headers });
+      return new Response(status === 204 ? null : cachedBody ?? JSON.stringify(payload), { status, headers });
     },
   };
 }

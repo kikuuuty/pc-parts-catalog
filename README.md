@@ -21,6 +21,8 @@ Workers Paidへの変更後、全29,599製品のremote同期とdeploy、120件�
 最新の実測とlocal Phase 2との差5件の原因は [Paid / production検証結果](docs/production-paid-baseline.md) を参照してください。
 この派生FTS差はその後 [0006 forward migration](docs/fts-projection-consistency.md) で解消しました。
 現在は既存localのupgrade・fresh ingest・production remoteでFTS全29,599文書と120 queryのtop 20順が一致します。
+GET検索のedge cacheもproduction検証済みです。`ddr5` 10回のD1 readを90%、mixed 100 requestを93.29%削減しました。
+TTL 300秒・同期後epoch更新・Free換算は [production cache実測](docs/production-cache.md) を参照してください。
 
 ## クイックスタート
 
@@ -362,7 +364,8 @@ npm run worker:deploy
 |`POST /v1/search`|JSONによるfilters/ranges/facets/identifier/orderBy付き検索|
 
 公開APIは既定20件、最大50件、先頭1,000件までのoffset paginationです。
-GETは短い60秒cache header、POSTはno-store。public read-onlyとしてCORS `*`、credentialなし。
+GET検索は標準20件・先頭6ページをCache APIで300秒edge cacheします。同期完了後はcatalog epoch varを更新してdeployします。
+browser向けGET/POST検索はno-store。public read-onlyとしてCORS `*`、credentialなし。
 入力上限・レスポンス形式・エラー・観測方法・HTTP検証コマンドは
 [APIと運用の詳細](docs/cloudflare-production.md#api-v1)を参照してください。
 

@@ -8,8 +8,9 @@ import { searchQuery } from '../src/queries.js';
 import { categories } from '../src/model.js';
 import { createWorker } from '../src/worker.js';
 import { remoteDatabaseId, remoteCredentials } from '../src/remote-config.js';
+import { searchCacheKey, searchCachePolicy } from '../src/search-cache.js';
 
-async function setup(t) {
+async function setup(t, options = {}) {
   const db = database();
   t.after(() => db.sqlite.close());
   const commit = 'a'.repeat(40);
@@ -32,7 +33,8 @@ async function setup(t) {
     assert.match(sql, /^(SELECT|WITH) /);
     return db.query(sql, params);
   } }; } }; } } };
-  const worker = createWorker({ log: e => logs.push(e) });
+  Object.assign(env, { CATALOG_CACHE_EPOCH: 'test-catalog', SEARCH_CACHE_TTL_SECONDS: '300' });
+  const worker = createWorker({ log: e => logs.push(e), ...options });
   const request = (path, init) => worker.fetch(new Request(`https://catalog.example${path}`, init), env);
   return { db, logs, statements, worker, env, request };
 }
@@ -54,7 +56,7 @@ test('Worker health/categories and GET models execute the shared searchQuery on 
     assert.equal(body.meta.source.license, 'ODC-By 1.0');
     assert(!/search_score|search_match|search_fts_relevance|content_hash|raw_json/.test(JSON.stringify(body)));
     assert.equal(response.headers.get('access-control-allow-origin'), '*');
-    assert.match(response.headers.get('cache-control'), /max-age=60/);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
   }
   assert(!/14900k|9800x3d|SELECT|WITH/.test(JSON.stringify(logs)));
   assert(logs.every(e => e.status === 200));
@@ -184,4 +186,207 @@ test('Management CLI credentials prefer API environment and support captured Wra
   assert.deepEqual(await remoteCredentials(config, { CLOUDFLARE_ACCOUNT_ID: override, CLOUDFLARE_API_TOKEN: 'synthetic-api' }, () => { throw new Error('must not call Wrangler'); }), { account: override, token: 'synthetic-api' });
   await assert.rejects(remoteCredentials({}, {}, oauth), /account_id/);
   await assert.rejects(remoteCredentials(config, {}, async () => null), /authentication required/);
+});
+
+function fakeCache(now = Date.now) {
+  const entries = new Map();
+  const calls = { match: 0, put: 0 };
+  return { entries, calls,
+    async match(key) {
+      calls.match++;
+      assert.equal(key.method, 'GET');
+      assert.equal([...key.headers].length, 0);
+      const item = entries.get(key.url);
+      return item && now() < item.expires ? item.response.clone() : undefined;
+    },
+    async put(key, response) {
+      calls.put++;
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('x-request-id'), null);
+      assert.equal(response.headers.get('server-timing'), null);
+      const ttl = Number(response.headers.get('cache-control').match(/max-age=(\d+)/)[1]);
+      entries.set(key.url, { response: response.clone(), expires: now() + ttl * 1000 });
+    },
+  };
+}
+
+test('Canonical keys retain every result dimension, namespace, origin, epoch and TTL', () => {
+  const policy = { ttl: 300, epoch: 'catalog-a' };
+  const url = new URL('https://catalog.example/v1/search');
+  const key = (input, p = policy, u = url) => searchCacheKey(u, { category: 'storage', keyword: '990pro', ...input }, p).url;
+  assert.equal(key({}), key({ limit: 20, offset: 0, keyword: ' 990pro\t' }));
+  for (const change of [{ category: 'cpu' }, { keyword: '990 pro' }, { keyword: '990  pro' }, { keyword: '990PRO' },
+    { keyword: undefined }, { limit: 10 }, { offset: 20 }]) assert.notEqual(key({}), key(change));
+  assert.notEqual(key({}), key({}, { ...policy, epoch: 'catalog-b' }));
+  assert.notEqual(key({}), key({}, { ...policy, ttl: 60 }));
+  assert.notEqual(key({}), key({}, policy, new URL('https://other.example')));
+});
+
+test('GET canonical variants HIT without DB calls and preserve exact response, attribution, CORS and fresh request IDs', async t => {
+  const cache = fakeCache();
+  const { request, statements, logs } = await setup(t, { cache });
+  const variants = [
+    'category=gpu&q=rtx%205080',
+    'q=rtx+5080&offset=0&category=gpu&limit=20',
+    'offset=000&limit=020&q=%20rtx%205080%20&category=gpu',
+  ];
+  let body;
+  const ids = new Set();
+  for (const [i, query] of variants.entries()) {
+    const response = await request(`/v1/search?${query}`, { headers: { Origin: 'https://client.example',
+      Range: 'bytes=0-5', 'If-None-Match': '*', Cookie: 'arbitrary=1', Authorization: 'Bearer synthetic' } });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-cache'), i ? 'HIT' : 'MISS');
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.match(response.headers.get('access-control-expose-headers'), /X-Cache/);
+    if (i) {
+      assert.equal(response.headers.get('server-timing'), null);
+      assert.equal(logs.at(-1).d1_queries, 0);
+      assert.equal(logs.at(-1).rows_read, 0);
+      assert.deepEqual(await response.json(), body);
+    } else body = await response.json();
+    ids.add(response.headers.get('x-request-id'));
+  }
+  assert.equal(ids.size, 3);
+  assert.equal(statements.length, 1);
+  assert.equal(cache.calls.put, 1);
+  assert.equal(body.meta.source.license, 'ODC-By 1.0');
+  assert.equal(body.meta.window_limit, 1000);
+});
+
+test('Cached pages preserve all pagination metadata and exact direct POST response equality', async t => {
+  const cache = fakeCache();
+  const { request, statements } = await setup(t, { cache });
+  const allIds = [];
+  for (const offset of [0, 20, 40, 60, 100]) {
+    const path = `/v1/search?category=memory&q=ddr5&offset=${offset}`;
+    const miss = await request(path);
+    assert.equal(miss.headers.get('x-cache'), 'MISS');
+    const body = await miss.json();
+    allIds.push(...body.data.map(p => p.id));
+    const calls = statements.length;
+    const hit = await request(path);
+    assert.equal(hit.headers.get('x-cache'), 'HIT');
+    assert.deepEqual(await hit.json(), body);
+    assert.equal(statements.length, calls);
+    const direct = await request('/v1/search', post({ category: 'memory', keyword: 'ddr5', offset }));
+    assert.equal(direct.headers.get('x-cache'), 'BYPASS');
+    assert.deepEqual(await direct.json(), body);
+  }
+  assert.equal(new Set(allIds).size, 65);
+  assert.equal(cache.entries.size, 5);
+});
+
+test('TTL 60/300/600 expiry and catalog epoch rotation refresh changed DB responses without a version query', async t => {
+  let clock = 1_000_000;
+  const cache = fakeCache(() => clock);
+  const { request, env, statements } = await setup(t, { cache, now: () => clock });
+  const path = '/v1/search?category=cpu&q=14900k';
+  for (const ttl of [60, 300, 600]) {
+    env.SEARCH_CACHE_TTL_SECONDS = String(ttl);
+    assert.equal((await request(path)).headers.get('x-cache'), 'MISS');
+    clock += ttl * 1000 - 1;
+    const hit = await request(path);
+    assert.equal(hit.headers.get('x-cache'), 'HIT');
+    assert.equal(hit.headers.get('age'), String(ttl - 1));
+    clock++;
+    assert.equal((await request(path)).headers.get('x-cache'), 'MISS');
+  }
+  const previousCalls = statements.length;
+  const oldBody = await (await request(path)).json();
+  const prepare = env.DB.prepare;
+  env.DB.prepare = sql => ({ bind: (...params) => ({ all: async () => {
+    const result = await prepare(sql).bind(...params).all();
+    return { ...result, results: result.results.map(row => ({ ...row, name: `${row.name} updated` })) };
+  } }) });
+  assert.deepEqual(await (await request(path)).json(), oldBody);
+  env.CATALOG_CACHE_EPOCH = 'new-catalog';
+  const refreshed = await request(path);
+  assert.equal(refreshed.headers.get('x-cache'), 'MISS');
+  assert.notDeepEqual(await refreshed.json(), oldBody);
+  assert.equal(statements.length, previousCalls + 1);
+  assert.equal((await request(path)).headers.get('x-cache'), 'HIT');
+  assert(statements.every(({ sql }) => sql.startsWith('WITH search_input AS')));
+});
+
+test('Cache admission bounds pagination fanout without changing valid API limits', async t => {
+  const cache = fakeCache();
+  const { request, env } = await setup(t, { cache });
+  for (const query of ['limit=1', 'limit=10', 'limit=50', 'offset=1', 'offset=101', 'offset=120', 'limit=50&offset=950']) {
+    const response = await request(`/v1/search?category=memory&q=ddr5&${query}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-cache'), 'BYPASS');
+  }
+  assert.equal(cache.calls.match, 0);
+  for (const value of ['0', 'oops', '3600']) {
+    env.SEARCH_CACHE_TTL_SECONDS = value;
+    assert.equal(searchCachePolicy(env, {}), null);
+  }
+  env.SEARCH_CACHE_TTL_SECONDS = '300';
+  for (const value of [undefined, '', 'unsafe/epoch']) {
+    env.CATALOG_CACHE_EPOCH = value;
+    assert.equal((await request('/v1/search?category=memory&q=ddr5')).headers.get('x-cache'), 'BYPASS');
+  }
+  assert.equal(cache.calls.put, 0);
+});
+
+test('POST, health, categories, OPTIONS and every HTTP validation error bypass cache', async t => {
+  const cache = fakeCache();
+  const { request } = await setup(t, { cache });
+  const cases = [
+    ['/v1/search', post({ category: 'cpu', keyword: '14900k' }), 200],
+    ['/v1/health', undefined, 200], ['/v1/categories', undefined, 200],
+    ['/v1/search', { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } }, 204],
+    ['/v1/search?category=cpu&q=14900k&debug=true', undefined, 400],
+    ['/v1/search?category=cpu&q=14900k&category=cpu', undefined, 400],
+    ['/v1/search?category=cpu&q=+', undefined, 400],
+    ['/unknown', undefined, 404], ['/v1/search', { method: 'HEAD' }, 405],
+    ['/v1/search', post({ category: 'cpu', keyword: 'x'.repeat(17000) }), 413],
+    ['/v1/search', { method: 'POST', body: '{}' }, 415],
+  ];
+  for (const [path, init, status] of cases) {
+    const response = await request(path, init);
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get('x-cache'), 'BYPASS');
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    if (path !== '/v1/categories') assert.equal(response.headers.get('cache-control'), 'no-store');
+  }
+  assert.deepEqual(cache.calls, { match: 0, put: 0 });
+});
+
+test('D1 errors are never stored; malformed/error cache entries cannot be returned as a HIT', async () => {
+  for (const status of [400, 404, 405, 413, 415, 429, 500, 503]) {
+    const cache = { match: async () => new Response('{}', { status }), put: () => assert.fail('No error may be stored') };
+    const worker = createWorker({ cache, log() {} });
+    const response = await worker.fetch(new Request('https://catalog.example/v1/search?category=cpu&q=14900k'), {
+      CATALOG_CACHE_EPOCH: 'test', DB: { prepare: () => ({ bind: () => ({ all: () => { throw new Error(status === 500 ? 'syntax' : 'timeout'); } }) }) },
+    });
+    assert.equal(response.status, status === 500 ? 500 : 503);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-cache'), 'BYPASS');
+  }
+});
+
+test('Cache read/write failures fail open to the identical successful D1 response', async t => {
+  for (const operation of ['match', 'put']) {
+    const cache = fakeCache();
+    cache[operation] = async () => { throw new Error('synthetic cache unavailable'); };
+    const { request, logs } = await setup(t, { cache });
+    const response = await request('/v1/search?category=cpu&q=14900k');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-cache'), 'BYPASS');
+    assert.equal(logs.at(-1).cache_error, operation);
+    assert.equal(logs.at(-1).d1_queries, 1);
+    assert.deepEqual(await response.json(), await (await request('/v1/search', post({ category: 'cpu', keyword: '14900k' }))).json());
+  }
+});
+
+test('Cache-key-only whitespace trimming preserves real search results including conflicting specs', async t => {
+  const { request } = await setup(t);
+  for (const [category, keyword] of [['cpu', '14900k'], ['cpu', 'ryzen 7'], ['storage', '990 pro 2tb'],
+    ['memory', 'ddr5'], ['memory', 'ddr5 6000 cl30 32gb'], ['memory', '32gb 64gb'], ['gpu', 'gaming x trio 5080']]) {
+    const direct = q => request('/v1/search', post({ category, keyword: q })).then(r => r.json());
+    assert.deepEqual(await direct(keyword), await direct(` \t${keyword}\u3000`));
+  }
 });
