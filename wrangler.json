@@ -1,13 +1,33 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pc-parts-catalog",
+  "account_id": "ac7e9239a1eb4f0c95b2558dc6298eb5",
+  "main": "src/worker.js",
   "compatibility_date": "2026-09-12",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false, "head_sampling_rate": 1 }
+  },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "pc-parts-catalog",
-      "database_id": "00000000-0000-0000-0000-000000000002",
+      "database_id": "180175e0-edc0-49df-a9d7-5958d5982e8f",
       "migrations_dir": "migrations"
     }
-  ]
+  ],
+  "env": {
+    "local": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "pc-parts-catalog",
+          "database_id": "00000000-0000-0000-0000-000000000002",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
 }
