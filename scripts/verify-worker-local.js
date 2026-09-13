@@ -61,12 +61,12 @@ try {
     }
   }
   if (interrupted) throw new Error('Verification interrupted');
-  console.log('Worker ready. Running HTTP/direct-D1 comparison including all 120 Golden Queries (deadline 180s).');
-  verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--golden', '--output', '.cache/api-local-production.json'], {
+  console.log('Worker ready. Running paced HTTP/direct-D1 comparison including all 120 Golden Queries (deadline 600s).');
+  verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--golden', '--paced', '--output', '.cache/api-local-production.json'], {
     stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
   });
   const exit = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { void stop(verification); reject(new Error('HTTP verification exceeded 180s')); }, 180_000);
+    const timer = setTimeout(() => { void stop(verification); reject(new Error('HTTP verification exceeded 600s')); }, 600_000);
     verification.once('error', error => { clearTimeout(timer); reject(error); });
     verification.once('exit', code => { clearTimeout(timer); resolve(code); });
   });

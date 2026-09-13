@@ -19,6 +19,7 @@
     "worker:deploy": "node scripts/worker-predeploy.js && wrangler deploy --env=\"\"",
     "verify:api": "node scripts/verify-api.js",
     "verify:worker:local": "node scripts/verify-worker-local.js",
+    "verify:protection": "node --test test/search-protection.test.js",
     "schema:generate": "node scripts/generate-schema.js",
     "schema:check": "node scripts/generate-schema.js --check",
     "test": "node --test",

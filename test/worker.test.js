@@ -9,6 +9,7 @@ import { categories } from '../src/model.js';
 import { createWorker } from '../src/worker.js';
 import { remoteDatabaseId, remoteCredentials } from '../src/remote-config.js';
 import { searchCacheKey, searchCachePolicy } from '../src/search-cache.js';
+import { fakeLimiters } from '../test-support/rate-limiter.js';
 
 async function setup(t, options = {}) {
   const db = database();
@@ -33,7 +34,7 @@ async function setup(t, options = {}) {
     assert.match(sql, /^(SELECT|WITH) /);
     return db.query(sql, params);
   } }; } }; } } };
-  Object.assign(env, { CATALOG_CACHE_EPOCH: 'test-catalog', SEARCH_CACHE_TTL_SECONDS: '300' });
+  Object.assign(env, fakeLimiters({ unlimited: true }), { CATALOG_CACHE_EPOCH: 'test-catalog', SEARCH_CACHE_TTL_SECONDS: '300' });
   const worker = createWorker({ log: e => logs.push(e), ...options });
   const request = (path, init) => worker.fetch(new Request(`https://catalog.example${path}`, init), env);
   return { db, logs, statements, worker, env, request };
@@ -91,7 +92,7 @@ test('Pagination preserves ranking/ties, lookahead and the explicit 1000-result 
   assert.equal(new Set(ids).size, 65);
   assert.equal((await request('/v1/search?category=memory&limit=50&offset=950')).status, 200);
   assert.equal((await request('/v1/search?category=memory&limit=50&offset=951')).status, 400);
-  const manyRows = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: Array.from({ length: 51 }, () => ({})) }) }) }) } };
+  const manyRows = { ...fakeLimiters({ unlimited: true }), DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: Array.from({ length: 51 }, () => ({})) }) }) }) } };
   const boundary = await createWorker({ log() {} }).fetch(new Request('https://catalog.example/v1/search?category=memory&offset=950&limit=50'), manyRows);
   const { meta } = await boundary.json();
   assert.equal(meta.has_more, true);
@@ -154,7 +155,7 @@ test('D1 errors are classified without leaking SQL, stack, secrets or request in
   const logs = [];
   const worker = createWorker({ log: e => logs.push(e) });
   for (const [message, status] of [['D1_ERROR: temporarily unavailable SELECT secret', 503], ['D1_ERROR: syntax error SELECT secret', 500]]) {
-    const env = { DB: { prepare: () => ({ bind: () => ({ all: async () => { throw new Error(message); } }) }) } };
+    const env = { ...fakeLimiters({ unlimited: true }), DB: { prepare: () => ({ bind: () => ({ all: async () => { throw new Error(message); } }) }) } };
     const response = await worker.fetch(new Request('https://catalog.example/v1/search?category=cpu&q=privatequery'), env);
     assert.equal(response.status, status);
     const text = await response.text();
@@ -162,7 +163,7 @@ test('D1 errors are classified without leaking SQL, stack, secrets or request in
     assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.equal(response.headers.get('retry-after'), status === 503 ? '30' : null);
   }
-  assert.equal((await worker.fetch(new Request('https://catalog.example/v1/health'), {})).status, 500);
+  assert.equal((await worker.fetch(new Request('https://catalog.example/v1/health'), {})).status, 503);
 });
 
 test('Remote configuration uses the real binding by default and preserves explicit CLI override', () => {
@@ -360,6 +361,7 @@ test('D1 errors are never stored; malformed/error cache entries cannot be return
     const cache = { match: async () => new Response('{}', { status }), put: () => assert.fail('No error may be stored') };
     const worker = createWorker({ cache, log() {} });
     const response = await worker.fetch(new Request('https://catalog.example/v1/search?category=cpu&q=14900k'), {
+      ...fakeLimiters({ unlimited: true }),
       CATALOG_CACHE_EPOCH: 'test', DB: { prepare: () => ({ bind: () => ({ all: () => { throw new Error(status === 500 ? 'syntax' : 'timeout'); } }) }) },
     });
     assert.equal(response.status, status === 500 ? 500 : 503);

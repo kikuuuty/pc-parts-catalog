@@ -2,6 +2,7 @@
 
 最新の全量同期・deploy・実HTTP検証は [production-paid-baseline.md](production-paid-baseline.md)。
 現在のGET cache設計・最新deploy・D1 read削減実測は [production-cache.md](production-cache.md)。
+最新のD1 MISS/POST Rate Limiting・deploy・stampedeの未達事項は [production-rate-limiting.md](production-rate-limiting.md)。
 初回Free/partial時点の履歴は [production-baseline.md](production-baseline.md)。
 派生FTSの現在の生成規則と0006適用結果は [FTS projection consistency](fts-projection-consistency.md)。
 検索SQL、ranking、Golden expected、カタログ正規化は既存Phase 2を共有する。
@@ -158,7 +159,7 @@ npm run verify:worker:local
 
 8787がcatalogとして正常なら既存Workerを再利用し、そのプロセスを終了しない。
 ポートが空いていればstdioを `.cache/worker-dev.stdout.log` / `.cache/worker-dev.stderr.log` へredirectし、
-ウィンドウを開かず起動する。60秒以内のhealth確認、180秒以内のHTTPテスト、所有プロセスtreeの終了までを行う。
+ウィンドウを開かず起動する。60秒以内のhealth確認、600秒以内のpaced HTTPテスト、所有プロセスtreeの終了までを行う。
 既存の別サービスが8787を使っていれば停止・再起動せずエラーにする。
 `npm run stats` や `verify:plans` など、別workerdを作るローカル管理コマンドは原則直列に実行する。
 
@@ -172,6 +173,7 @@ npm run worker:deploy
 
 `worker:deploy` は `scripts/worker-predeploy.js` → `wrangler deploy --env=""`（root production環境を明示）。
 実UUID、binding、CLI overrideとの一致、migration履歴、latest sync=complete、active>0、FKエラーなし、live leaseなしを確認する。
+productionの4 rate-limit binding名/namespace/thresholdとcatalog cache epoch/TTLも検証する。
 predeployはread-only。1つでも失敗するとdeployへ進まない。品質benchmarkは別途上記手順で確認する。
 手動で `npx wrangler deploy --env=""` を直接使う場合も、先に同じpredeployと品質確認を行う。
 同期がpartialの状態では本番公開しない。
@@ -179,10 +181,11 @@ predeployはread-only。1つでも失敗するとdeployへ進まない。品質b
 deploy出力の実workers.dev URLで検証する（下記は今回公開したURL）。
 
 ```sh
-npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --baseline .cache/search-remote-phase2.json --output .cache/api-production.json
+npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --paced --baseline .cache/search-fts-remote-after.json --output .cache/api-production.json
 ```
 
 health/categories、主要11検索×3回、高度POST、固定120 Golden Queryの上位20件をremote directと比較する。
+`--paced`は検証clientだけを間引き、本番limiterを有効のまま検証する。429を自動retryして隠さない。
 baseline指定時は保存済みbenchmarkのtop 10順とも一致を要求する。
 全量snapshotを要求し、測定前後のsync run/leaseの変化を検知したら失敗する。
 同時syncや、同期経由でない手動補完を避けて測定する。
@@ -200,6 +203,7 @@ GET /v1/search?category=gpu&q=rtx5080
 ```
 
 healthは `SELECT 1 AS ok` を実行し、`{"ok":true,"database":"available"}` を返す。
+実行直前に専用`HEALTH_LIMITER`（coloあたり60回/60秒）を判定する。拒否時は429、D1=0。
 接続確認であり、全カタログ同期完了の判定ではない。categoriesは `src/model.js` 由来。
 GET検索に指定できるのは `category` / `q` / `limit` / `offset`。qを省略するとカテゴリ一覧。
 
@@ -300,16 +304,19 @@ Content-Lengthだけに依存せず、streamをbyte計測して超過時に中�
 |413|body size超過|
 |415|Content-Type不正|
 |500|想定外・非一時的DBエラー|
-|503|DB timeout/一時障害/枠超過など。Retry-After: 30|
-|429|将来のedge rate limitで利用予定。現在は未実装|
+|503|DB timeout/一時障害/枠超過などはRetry-After: 30。rate binding障害はPROTECTION_UNAVAILABLE、10/60秒|
+|429|RATE_LIMITED。refill/in-flightはRetry-After: 10、全MISS/expensive/healthは60。no-store、D1=0|
 
 エラー形式は `{"error":{"code":"...","message":"..."},"request_id":"..."}`。
 D1例外のSQL/stack/内部messageをクライアントへ返さず、エラーはno-store。
 
 public read-only catalogとしてCORS `*`、credentialsなし。OPTIONSはrouteの許可methodとContent-Typeのみを受理する。
 管理APIは別Worker/originと認証で分離する。CORSはrate limitやアクセス制御ではない。
-将来は利用量に合わせ、CloudflareのWAF/Rate Limiting対応プラン・route上でpath/IP単位の制限を設定する。
-コード内の分散しない巨大rate limiterは実装していない。
+Workers Rate Limiting bindingをvalidation→cache HIT判定の後、D1実行直前に適用する。
+HITはlimiterを呼ばずD1=0。全MISS 60/60秒、expensive/POST/非cache paginationは追加20/60秒、refillは同key 2/10秒。
+IPは使わない。colo-local / eventualなresource protectionであり、正確な課金quotaではない。
+isolate内in-flight guardも併用するが、productionの6並列cold MISSではD1実行6のままで、stampede削減は未達。
+binding/閾値根拠・障害時fail closed・Free availability要再確認は[rate protection詳細](production-rate-limiting.md)を参照。
 
 GET検索の200だけを `caches.default` で300秒edge cacheする。対象はlimit=20、offset=0/20/40/60/80/100。
 既存のAPI limit/offset上限は維持し、対象外pageは通常のD1検索を行う。
@@ -327,7 +334,8 @@ requestごとのD1 version取得やKVは使わない。epoch更新は手動で�
 `X-Request-ID` はHITでも毎回新規、`Server-Timing: d1;dur=...` は今回D1を実行した場合だけ返す。
 Workerは構造化ログにroute、method、category、limit、offset、status、elapsed、rows_read/written、SQL duration、
 cache_status、d1_queries、cache障害時のboundedなcache_errorを出す。HITはd1_queries=0、rows_read=0。
-URL全文、keyword、filter値、SQL、stack、tokenはログに含めない。
+rate_limit_status、rate_limit_class、search_cost_classを追加。HITはnot_checked/not_classifiedで、classifier/hashも省略する。
+URL全文、keyword、filter値、SQL、stack、token、IP、rate-limit keyはログに含めない。
 Wrangler observabilityは初期診断用にlog sampling=1、invocation_logs=false。利用増加後は費用・保持量に応じsamplingを調整する。
 Dashboard / `npx wrangler tail` でrequest IDを照合できる。health/categoriesやvalidation失敗に検索readを課さない。
 

@@ -6,12 +6,15 @@ import { searchQuery } from '../src/queries.js';
 import { loadSearchFixture } from '../src/quality/fixtures.js';
 import { catalogState, assertCatalogState } from '../src/quality/catalog.js';
 import { categories } from '../src/model.js';
+import { setTimeout as delay } from 'node:timers/promises';
+import { classifySearchCost } from '../src/search-protection.js';
 
 const { values: args } = parseArgs({ options: {
   url: { type: 'string' }, remote: { type: 'boolean', default: false }, rounds: { type: 'string', default: '3' },
   golden: { type: 'boolean', default: false }, baseline: { type: 'string' }, output: { type: 'string', default: '.cache/api-verification.json' },
   'direct-only': { type: 'boolean', default: false }, 'allow-partial': { type: 'boolean', default: false },
   'cache-repeat': { type: 'boolean', default: false }, 'golden-only': { type: 'boolean', default: false },
+  paced: { type: 'boolean', default: false },
 } });
 if (!args.url && !args['direct-only']) throw new Error('Provide --url http://127.0.0.1:8787 or the deployed HTTPS origin; use --remote to compare remote D1');
 if (args['direct-only'] && (args.url || args.golden || args.baseline)) throw new Error('--direct-only cannot be combined with URL/Golden API comparison');
@@ -45,8 +48,18 @@ const request = async (path, init) => {
   return { body, elapsed_ms, request_id: response.headers.get('x-request-id'), cf_cache_status: response.headers.get('cf-cache-status'),
     cache_status: response.headers.get('x-cache'), age: response.headers.get('age'), server_timing: response.headers.get('server-timing') };
 };
-const apiSearch = item => item.search ? request('/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...item.search, category: item.category, keyword: item.query, limit: 20 }) })
-  : request(`/v1/search?${new URLSearchParams({ category: item.category, q: item.query, limit: '20' })}`);
+let lastSearch = 0, lastExpensive = 0;
+const apiSearch = async (item, knownHit = false) => {
+  const expensive = classifySearchCost({ ...item.search, category: item.category, keyword: item.query }, { method: item.search ? 'POST' : 'GET' }) !== 'normal';
+  if (args.paced && !knownHit) {
+    // Client-side administrative verification pacing, no public bypass or retries hiding 429.
+    await delay(Math.max(0, lastSearch + 1100 - Date.now(), expensive ? lastExpensive + 3300 - Date.now() : 0));
+    lastSearch = Date.now();
+    if (expensive) lastExpensive = lastSearch;
+  }
+  return item.search ? request('/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...item.search, category: item.category, keyword: item.query, limit: 20 }) })
+    : request(`/v1/search?${new URLSearchParams({ category: item.category, q: item.query, limit: '20' })}`);
+};
 const ids = rows => rows.map(p => p.upstream_key);
 const db = await openDatabase(args.remote);
 try {
@@ -101,7 +114,7 @@ try {
       }
       let repeat;
       if (args['cache-repeat']) {
-        repeat = await apiSearch(item);
+        repeat = await apiSearch(item, !item.search);
         assert.deepEqual(repeat.body, api.body, `Cache response mismatch: ${item.id}`);
         assert.equal(repeat.cache_status, item.search ? 'BYPASS' : 'HIT');
         if (!item.search) assert.equal(repeat.server_timing, null);

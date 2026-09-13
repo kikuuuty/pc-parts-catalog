@@ -1,6 +1,7 @@
 import { categories, models } from './model.js';
 import { searchQuery } from './queries.js';
 import { searchCachePolicy, searchCacheKey, readSearchCache, writeSearchCache } from './search-cache.js';
+import { protectSearch, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
 
 const MAX_BODY = 16 * 1024;
 const MAX_WINDOW = 1000;
@@ -114,6 +115,7 @@ const finite = value => typeof value === 'number' && Number.isFinite(value) && v
 
 // No CLI, REST credentials, writes, SQL logging, or user-controlled SQL here.
 export function createWorker({ log = entry => console.log(JSON.stringify(entry)), cache: injectedCache, now = Date.now } = {}) {
+  const refillGuard = createRefillGuard();
   return {
     async fetch(request, env) {
       const started = performance.now();
@@ -122,10 +124,11 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff', 'X-Request-ID': requestId,
         // Public, read-only catalog. Credentials and management routes are not supported.
-        'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Request-ID, Server-Timing, X-Cache, X-Cache-TTL, Age',
+        'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Request-ID, Server-Timing, X-Cache, X-Cache-TTL, Age, Retry-After',
       });
       const event = { event: 'catalog_api', request_id: requestId, route: 'unknown', method: request.method,
-        cache_status: 'BYPASS', d1_queries: 0, rows_read: 0, rows_written: 0, sql_duration_ms: null };
+        cache_status: 'BYPASS', rate_limit_status: 'not_checked', rate_limit_class: 'none', search_cost_class: 'not_classified',
+        d1_queries: 0, rows_read: 0, rows_written: 0, sql_duration_ms: null };
       let status = 200;
       let payload;
       let cachedBody;
@@ -167,6 +170,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
           if (!methods.includes(request.method)) throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
           if (url.pathname !== '/v1/search' && url.search) invalid('This endpoint accepts no query parameters');
           if (url.pathname === '/v1/health') {
+            await protectHealth(env, event);
             await execute('SELECT 1 AS ok');
             payload = { ok: true, database: 'available' };
           } else if (url.pathname === '/v1/categories') {
@@ -192,35 +196,40 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
               } catch { event.cache_status = 'BYPASS'; event.cache_error = 'match'; }
             }
             if (cachedBody === undefined) {
-              const rows = await execute(query.sql, query.params);
-              const hasMore = rows.length > limit;
-              const nextOffset = hasMore && offset + 2 * limit <= MAX_WINDOW ? offset + limit : null;
-              payload = {
-                data: rows.slice(0, limit).map(row => ({
-                  ...Object.fromEntries(productFields.map(key => [key, row[key] ?? null])),
-                  specs: Object.fromEntries(Object.keys(models[category].fields).map(key => [key, row[key] ?? null])),
-                })),
-                meta: { limit, offset, returned: Math.min(rows.length, limit), has_more: hasMore, next_offset: nextOffset,
-                  window_limit: MAX_WINDOW, window_exhausted: hasMore && nextOffset === null, source },
-              };
-              if (key) {
-                try {
-                  // Await the small write so a sequential request can immediately HIT.
-                  // Cache unavailability must never turn a successful search into 500.
-                  await writeSearchCache(cache, key, JSON.stringify(payload), policy.ttl, now());
-                } catch { event.cache_status = 'BYPASS'; event.cache_error = 'put'; }
-              }
+              const release = await protectSearch(env, event, input, request.method, key, refillGuard);
+              try {
+                const rows = await execute(query.sql, query.params);
+                const hasMore = rows.length > limit;
+                const nextOffset = hasMore && offset + 2 * limit <= MAX_WINDOW ? offset + limit : null;
+                payload = {
+                  data: rows.slice(0, limit).map(row => ({
+                    ...Object.fromEntries(productFields.map(key => [key, row[key] ?? null])),
+                    specs: Object.fromEntries(Object.keys(models[category].fields).map(key => [key, row[key] ?? null])),
+                  })),
+                  meta: { limit, offset, returned: Math.min(rows.length, limit), has_more: hasMore, next_offset: nextOffset,
+                    window_limit: MAX_WINDOW, window_exhausted: hasMore && nextOffset === null, source },
+                };
+                if (key) {
+                  try {
+                    // Await the small write so a sequential request can immediately HIT.
+                    // Cache unavailability must never turn a successful search into 500.
+                    await writeSearchCache(cache, key, JSON.stringify(payload), policy.ttl, now());
+                  } catch { event.cache_status = 'BYPASS'; event.cache_error = 'put'; }
+                }
+              } finally { release(); }
             }
           }
         }
       } catch (error) {
-        status = error instanceof HttpError ? error.status : 500;
-        const code = error instanceof HttpError ? error.code : 'INTERNAL_ERROR';
-        payload = { error: { code, message: error instanceof HttpError ? error.message : 'Internal server error' }, request_id: requestId };
+        const known = error instanceof HttpError || error instanceof ProtectionError;
+        status = known ? error.status : 500;
+        const code = known ? error.code : 'INTERNAL_ERROR';
+        payload = { error: { code, message: known ? error.message : 'Internal server error' }, request_id: requestId };
         event.error_code = code;
         event.cache_status = 'BYPASS';
         headers.delete('X-Cache-TTL');
         if (status === 503) headers.set('Retry-After', '30');
+        if (error instanceof ProtectionError) headers.set('Retry-After', String(error.retryAfter));
       }
       Object.assign(event, { status, elapsed_ms: Math.round((performance.now() - started) * 100) / 100 });
       headers.set('X-Cache', event.cache_status);

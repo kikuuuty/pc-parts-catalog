@@ -1,5 +1,9 @@
 # Production GET search cache — 2026-09-13
 
+> 以下はcache導入時の記録です。現在は[Rate Limiting保護層](production-rate-limiting.md)を追加済みで、
+> HITをlimiterへカウントせず、通常mixedの64 HIT / 36 MISS / 50,564 readsを維持しています。
+> ただしproductionの分散cold stampede削減は未達です。
+
 ## 結果
 
 **GET検索をCloudflare Cache APIでedge cacheし、HIT時のD1呼出し0をproduction tailで確認した。**
@@ -60,7 +64,7 @@ Cache API HITでもWorkerは実行される。HTTP request料金/Free request枠
 
 categoriesはmodel由来でD1を読まないためCache APIへ入れない。既存の60秒HTTP cache headerを維持。
 POST/health/errors/OPTIONSはno-store。400/404/405/413/415/429/500/503を保存する経路はない。
-429は現在API未実装であり、offlineで不正cache entryの429拒否も確認した。
+cache導入時は429未実装だった。現在はrate protectionが429を返し、Cache APIへ保存しないことを検証済み。
 
 ### Canonical key
 
@@ -302,7 +306,7 @@ Cloudflareプラン設定は変更していない。
 ## Remaining issues
 
 1. **Cache stampede**: Cache APIにはrequest collapsingなし。await putは逐次fill raceだけを抑える。分散lockやisolate内singleflightは未実装。現行Workers Cacheのgateway/inner entrypoint方式は将来比較候補。
-2. **Rate limiting**: unique q/POST/bypass pageのread消費は残る。次の候補。今回cache admissionはAPI上限と独立。
+2. **Rate limiting**: 後続の[rate protection](production-rate-limiting.md)で実装済み。unique q/POST/bypass pageをcolo-local limiterで保護。正確な課金quotaや分散mutexではない。
 3. **D1 broad query自体のread最適化**: MISSのddr5は35,963 readsのまま。検索品質を変えない別タスク。
 4. **同期運用**: 既存週次workflowはあるが、remote sync→complete確認→epoch deployの自動化は未対応。
 5. **Free downgrade**: 実traffic観測、CPU外れ値の確認、read/write余裕の確保後にユーザー判断。

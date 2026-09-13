@@ -6,6 +6,12 @@
   "compatibility_date": "2026-09-12",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "ratelimits": [
+    { "name": "QUERY_REFILL_LIMITER", "namespace_id": "29599001", "simple": { "limit": 2, "period": 10 } },
+    { "name": "D1_MISS_LIMITER", "namespace_id": "29599002", "simple": { "limit": 60, "period": 60 } },
+    { "name": "EXPENSIVE_MISS_LIMITER", "namespace_id": "29599003", "simple": { "limit": 20, "period": 60 } },
+    { "name": "HEALTH_LIMITER", "namespace_id": "29599004", "simple": { "limit": 60, "period": 60 } }
+  ],
   "vars": {
     "CATALOG_CACHE_EPOCH": "sync-34aa2c91-d6eb-448b-8ece-05f027a156c2-fts6-cache1",
     "SEARCH_CACHE_TTL_SECONDS": "300"
@@ -24,6 +30,12 @@
   ],
   "env": {
     "local": {
+      "ratelimits": [
+        { "name": "QUERY_REFILL_LIMITER", "namespace_id": "29599101", "simple": { "limit": 2, "period": 10 } },
+        { "name": "D1_MISS_LIMITER", "namespace_id": "29599102", "simple": { "limit": 60, "period": 60 } },
+        { "name": "EXPENSIVE_MISS_LIMITER", "namespace_id": "29599103", "simple": { "limit": 20, "period": 60 } },
+        { "name": "HEALTH_LIMITER", "namespace_id": "29599104", "simple": { "limit": 60, "period": 60 } }
+      ],
       "vars": {
         "CATALOG_CACHE_EPOCH": "local-fts6",
         "SEARCH_CACHE_TTL_SECONDS": "300"

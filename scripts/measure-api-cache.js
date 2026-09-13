@@ -11,6 +11,7 @@ const { values: args } = parseArgs({ options: {
   url: { type: 'string', default: 'https://pc-parts-catalog.kikuuuty.workers.dev' },
   baseline: { type: 'boolean', default: false }, output: { type: 'string' },
   compare: { type: 'string' }, 'expiry-seconds': { type: 'string', default: '305' },
+  'cold-wait-seconds': { type: 'string', default: '0' },
 } });
 const output = args.output ?? `.cache/cache-${args.baseline ? 'before' : 'after'}.json`;
 const { fixture } = await loadSearchFixture();
@@ -23,6 +24,9 @@ const workload = popular.flatMap(([category, query, n]) => Array.from({ length: 
 const ordered = Array.from({ length: 100 }, (_, i) => workload[(i * 37) % 100]);
 const report = { generated_at: new Date().toISOString(), origin: args.url, baseline: args.baseline, repeated: [], mixed: [] };
 const before = args.compare ? JSON.parse(await readFile(args.compare, 'utf8')) : null;
+const coldWait = Number(args['cold-wait-seconds']);
+assert(Number.isInteger(coldWait) && coldWait >= 0 && coldWait <= 600);
+if (coldWait) await delay(coldWait * 1000);
 const db = await openDatabase(true);
 const tail = await startTail();
 try {

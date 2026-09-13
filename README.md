@@ -23,6 +23,9 @@ Workers Paidへの変更後、全29,599製品のremote同期とdeploy、120件�
 現在は既存localのupgrade・fresh ingest・production remoteでFTS全29,599文書と120 queryのtop 20順が一致します。
 GET検索のedge cacheもproduction検証済みです。`ddr5` 10回のD1 readを90%、mixed 100 requestを93.29%削減しました。
 TTL 300秒・同期後epoch更新・Free換算は [production cache実測](docs/production-cache.md) を参照してください。
+cache HIT後・D1直前のRate Limitingも導入しました。通常mixedの429=0・read削減率を維持し、POSTの429/D1=0を本番確認済みです。
+**分散cold stampedeの削減は本番6並列で未達**です。binding設定、unique burstのoffline検証、CPU、Freeの要再確認事項は
+[production rate protection](docs/production-rate-limiting.md) を参照してください。
 
 ## クイックスタート
 
