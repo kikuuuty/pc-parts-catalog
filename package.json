@@ -12,6 +12,7 @@
     "search": "node src/cli.js search",
     "stats": "node src/cli.js stats",
     "verify:plans": "node src/cli.js plans",
+    "verify:catalog": "node scripts/verify-all-categories.js",
     "audit:completeness": "node src/cli.js audit-completeness",
     "audit:duplicates": "node src/cli.js audit-duplicates",
     "benchmark:search": "node src/cli.js benchmark-search",

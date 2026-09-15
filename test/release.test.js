@@ -8,7 +8,7 @@ import { database } from '../test-support/database.js';
 import { normalize } from '../src/normalize.js';
 import { syncSnapshot } from '../src/sync.js';
 import { catalogState } from '../src/quality/catalog.js';
-import { cacheEpoch, productionConfig, withReleaseLease, assertGolden, readiness, migrationGate } from '../scripts/lib/release-gates.js';
+import { cacheEpoch, productionConfig, withReleaseLease, assertGolden, readiness, migrationGate, FTS_GENERATION } from '../scripts/lib/release-gates.js';
 import { assertDeployedVars } from '../scripts/lib/cloudflare-release.js';
 import { pacedRequests } from '../scripts/lib/production-smoke.js';
 
@@ -45,7 +45,7 @@ test('retry reuses completed sync only after comparing DB hashes; partial and fa
   assert.equal(repeat.updated, 0);
   assert.equal(repeat.unchanged, 1);
   assert.equal((await db.query('SELECT count(*) AS n FROM sync_runs')).results[0].n, 1);
-  assert.equal(cacheEpoch(await catalogState(db)), `sync-${first.run_id}-fts6-cache1`);
+  assert.equal(cacheEpoch(await catalogState(db)), `sync-${first.run_id}-fts${FTS_GENERATION}-cache1`);
   db.sqlite.exec("UPDATE products SET content_hash='interrupted-write'");
   const resumed = await syncSnapshot(db, snapshot, { reuseComplete: true });
   assert.notEqual(resumed.run_id, first.run_id);
@@ -91,8 +91,8 @@ test('retry of an old workflow cannot overwrite a newer catalog, even after acqu
 test('epoch tracks snapshot/projection/cache generations, not workflow attempts', () => {
   const sync = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', status: 'complete' };
   assert.equal(cacheEpoch(sync), cacheEpoch({ ...sync, attempt: 99 }));
-  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, 7));
-  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, 6, 'v2'));
+  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION + 1));
+  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION, 'v2'));
   assert.throws(() => cacheEpoch({ ...sync, status: 'partial' }));
 });
 

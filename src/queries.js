@@ -128,7 +128,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     }
   }
   for (const [attribute, raw] of Object.entries(facets)) {
-    if (!['memory_type','socket','motherboard_form_factor','psu_form_factor'].includes(attribute)) throw new Error('Unknown facet');
+    if (!model.facets.includes(attribute)) throw new Error('Unknown facet');
     const values = Array.isArray(raw) ? raw : [raw];
     if (!values.length || values.length > 20 || values.some(v => typeof v !== 'string' || !v.length)) throw new Error('Invalid facet values');
     // With selective typed filters, probe a candidate product's small facet set.
@@ -147,6 +147,12 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   }
   let withSQL = '';
   let from = `products p JOIN ${model.table} s ON s.product_id=p.id`;
+  // New categories can stream an explicitly filtered, indexed sort before PK
+  // product/facet probes. This avoids fresh-statistics category-first sorting.
+  if (model.indexedOrderFirst && orderBy && (Object.hasOwn(filters, orderBy) || Object.hasOwn(ranges, orderBy))
+      && Object.values(model.indexes).some(columns => columns[0] === orderBy)) {
+    from = `${model.table} s CROSS JOIN products p ON p.id=s.product_id`;
+  }
   let diagnostics = '';
   let projection = productProjection;
   let order = orderBy ? `${column(orderBy)},s.product_id` : 'p.id';
@@ -220,7 +226,8 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     // ineligible shape cannot produce a trusted identifier; avoid opening that
     // view at all. Keep the key parameter slot even in the empty branch.
     const exactIdentifiers = terms.identifierKind ? `SELECT DISTINCT product_id FROM identifiers WHERE value_key=${key} AND
-      ${terms.identifierKind === 'mpn' ? "type='mpn'" : "type IN ('gtin','ean','upc','jan')"}`
+      ${terms.identifierKind === 'mpn' ? "type='mpn'" : "type IN ('gtin','ean','upc','jan')"}
+      AND EXISTS (SELECT 1 FROM product_fts WHERE rowid=identifiers.product_id)`
       : `SELECT NULL AS product_id WHERE 0 AND ${key} IS NULL`;
     const ranking = rankColumns(`SELECT c.*, CASE
           WHEN c.fallback=0 AND p.id IN (SELECT product_id FROM trusted_identifiers) THEN 800
@@ -259,7 +266,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   params.push(limit);
   if (params.length > 100) throw new Error('D1 supports at most 100 bound parameters');
   return {
-    sql: `${withSQL}SELECT ${projection}${diagnostics} FROM ${from} WHERE ${predicates} ORDER BY ${order} LIMIT ?`,
+    sql: `${withSQL}SELECT ${projection}${diagnostics} FROM ${from} WHERE ${predicates} ORDER BY ${order} LIMIT ?`.replaceAll('product_fts', model.searchIndex),
     params,
   };
 }
@@ -302,6 +309,14 @@ export const representativeQueries = [
   { name: '35 Storage unindexed spec intent', category: 'storage', options: { keyword: 'nvme' }, indexes: ['VIRTUAL TABLE INDEX'] },
   { name: '36 Case broad form factor word', category: 'case', options: { keyword: 'atx' }, indexes: ['VIRTUAL TABLE INDEX'] },
   { name: '37 Memory category listing', category: 'memory', options: {}, indexes: [] },
+  { name: '38 Monitor resolution and refresh', category: 'monitor', options: { filters: { resolution_width: 2560, resolution_height: 1440 }, ranges: { refresh_rate_hz: { min: 144 } }, orderBy: 'refresh_rate_hz' }, indexes: ['monitor_resolution_refresh'] },
+  { name: '39 Keyboard size and switch', category: 'keyboard', options: { filters: { size: '75%', switch_type: 'Linear' } }, indexes: ['keyboard_size_switch'] },
+  { name: '40 Mouse shape and weight', category: 'mouse', options: { filters: { shape: 'Ergonomic' }, ranges: { weight_g: { max: 70 } }, orderBy: 'weight_g' }, indexes: ['mouse_shape_weight'] },
+  { name: '41 Headphones acoustic type', category: 'headphones', options: { filters: { headphone_type: 'Closed-Back' }, orderBy: 'weight_g' }, indexes: ['headphones_type_weight'] },
+  { name: '42 Webcam resolution and FPS', category: 'webcam', options: { filters: { resolution: '4k' }, ranges: { frame_rate_fps: { min: 30 } }, orderBy: 'frame_rate_fps' }, indexes: ['webcam_resolution_fps'] },
+  { name: '43 Microphone multi-valued connectivity', category: 'microphone', options: { facets: { connectivity_type: 'XLR' } }, indexes: ['facets_value'] },
+  { name: '44 Network card basic FTS', category: 'network_card', options: { keyword: 'Intel' }, indexes: ['VIRTUAL TABLE INDEX'] },
+  { name: '45 Keyboard connectivity facet and polling range', category: 'keyboard', options: { ranges: { polling_rate_hz: { min: 1000 } }, facets: { connectivity: 'Bluetooth' }, orderBy: 'polling_rate_hz' }, indexes: ['keyboard_polling'] },
 ];
 
 export function hasCatalogFullScan(details) {

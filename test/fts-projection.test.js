@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { database } from '../test-support/database.js';
 import { normalize } from '../src/normalize.js';
-import { categories, models } from '../src/model.js';
+import { initialCategories as categories, models } from '../src/model.js';
 import { syncSnapshot } from '../src/sync.js';
 import { searchQuery } from '../src/queries.js';
 import { addLocalIdentifier, setLocalEnrichment } from '../src/enrichment.js';
@@ -25,7 +25,7 @@ const records = () => [
 ];
 const seed = (db, rows) => syncSnapshot(db, { commit, records: rows });
 const fts = db => db.sqlite.prepare('SELECT rowid,text,name,manufacturer,series,variant,family FROM product_fts ORDER BY rowid').all();
-const protectedRows = db => ['products', ...Object.values(models).map(m => m.table), 'upstream_raw',
+const protectedRows = db => ['products', ...categories.map(c => models[c].table), 'upstream_raw',
   'upstream_identifiers', 'local_identifiers', 'local_enrichments', 'product_facets', 'sync_runs', 'local_identifier_fts']
   .map(table => db.sqlite.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
 

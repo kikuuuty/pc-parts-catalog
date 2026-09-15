@@ -5,6 +5,7 @@ import { searchQuery } from '../../src/queries.js';
 import { loadSearchFixture } from '../../src/quality/fixtures.js';
 import { catalogState, assertCatalogState } from '../../src/quality/catalog.js';
 import { assertCategories, assertSearchContract, assertPublicHeaders } from './api-contract.js';
+import { models, initialCategories } from '../../src/model.js';
 
 export function productionOrigin(value) {
   const url = new URL(value);
@@ -60,6 +61,10 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
     const q = searchQuery(category, { ...advanced, keyword, limit: limit + 1 });
     const rows = (await db.query(`${q.sql} OFFSET ?`, [...q.params, offset])).results;
     assert.deepEqual(result.body.data.map(p => p.upstream_key), rows.slice(0, limit).map(p => p.upstream_key), 'API/direct top results differ');
+    for (const [i, product] of result.body.data.entries()) {
+      assert.deepEqual(product.specs, Object.fromEntries(Object.keys(models[category].fields).map(field => [field, rows[i][field] ?? null])), 'API/direct specs differ');
+      for (const field of ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url']) assert.equal(product[field], rows[i][field] ?? null, `API/direct ${field} differs`);
+    }
     assert.equal(result.body.meta.has_more, rows.length > limit);
     if (method === 'POST') assert.equal(result.response.headers.get('x-cache'), 'BYPASS');
     return result;
@@ -98,6 +103,20 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
     cache = true;
   }
   assert(cache, 'Cache MISS/HIT verification inconclusive after bounded attempts');
+  const extended = [];
+  for (const category of Object.keys(models).filter(c => !initialCategories.includes(c))) {
+    const samples = (await db.query(`SELECT p.upstream_key,p.name,i.type,i.value FROM products p JOIN identifiers i ON i.product_id=p.id
+      WHERE p.active=1 AND p.category=? ORDER BY p.id LIMIT 100`, [category])).results;
+    const sample = samples.find(p => p.name.length <= 200 && (p.name.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= 12);
+    assert(sample, `Missing API sample: ${category}`);
+    const basic = await search({ category, keyword: sample.name });
+    assert(basic.body.data.some(p => p.upstream_key === sample.upstream_key), `New category keyword: ${category}`);
+    const exact = await search({ category, identifier: { type: sample.type, value: sample.value }, include: ['identifiers', 'facets'] }, 'POST');
+    const product = exact.body.data.find(p => p.upstream_key === sample.upstream_key);
+    assert(product?.identifiers.some(i => i.type === sample.type && i.value === sample.value), `New category identifier response: ${category}`);
+    assert(product.facets && Object.values(product.facets).every(Array.isArray));
+    extended.push({ category, keyword: 'pass', identifier: 'pass', response: 'pass' });
+  }
   let matched = 0;
   if (golden) {
     const { fixture } = await loadSearchFixture();
@@ -108,5 +127,5 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
     assert.equal(matched, 120);
   }
   await assertCatalogState(db, initial);
-  return { contract: 'pass', cache: 'MISS -> HIT; POST body equal', golden_api_matched: matched };
+  return { contract: 'pass', cache: 'MISS -> HIT; POST body equal', golden_api_matched: matched, extended_categories: extended };
 }

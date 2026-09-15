@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { categories } from '../../src/model.js';
 
-// Consumer-visible invariants only; deliberately independent of SQL/model tables.
-export const PUBLIC_CATEGORIES = ['cpu', 'memory', 'motherboard', 'gpu', 'storage', 'psu', 'case', 'case_fan', 'cpu_cooler'];
+// The registry owns the category list; consumer-visible invariants stay below.
+export const PUBLIC_CATEGORIES = categories;
 export function assertCategories(body) {
   assert.deepEqual([...body.categories].sort(), [...PUBLIC_CATEGORIES].sort(), 'Category contract');
 }

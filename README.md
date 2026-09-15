@@ -34,6 +34,11 @@ broad 29 query合計を48.80%削減しました。120 Goldenのtop20一致、CPU
 [catalog release pipeline](docs/catalog-release.md) に統合しました。epochのGit編集は不要です。
 次フェーズの見積もりサイトからの利用は [consumer API契約](docs/cloudflare-production.md#frontend-integration-quick-reference) を参照してください。
 
+**ローカル実装はBuildCores全30カテゴリへ拡張済み**です。固定snapshotの48,134製品を取得・検証・同期し、
+既存120 Goldenのtop20/score不変を確認しました。全カテゴリ件数、typed field、forward migration、API include、
+194.9 MiBの容量実測とproduction反映前の確認は [全カテゴリ対応レポート](docs/all-categories.md) を参照してください。
+この拡張のproduction反映はまだ実施していません。
+
 ## クイックスタート
 
 必要環境: **Node.js 24.x、npm、Git**。ローカル実行にはCloudflareアカウントは不要です。
@@ -49,9 +54,9 @@ npm run stats
 npm run verify:plans
 ```
 
-- 取得先: `.cache/upstream/`。9カテゴリの製品とSchemaをsparse checkoutします。
+- 取得先: `.cache/upstream/`。registryに明示された全30カテゴリの製品とSchemaをsparse checkoutします。未知カテゴリはGit tree照合で検出します。
 - ローカルD1: `.wrangler/state/v3/d1/`。Wranglerと検索・同期CLIは同じDBを使います。
-- 初回は約3万JSONの取得とインポートのため数分かかります。
+- 初回は約4.8万JSONの取得とインポートのため数分かかります。
 - `sync` は取得済みのcommitを使用します。最新取得は `upstream:fetch` を明示的に実行します。
 - `.cache/`、`.wrangler/`、データ本体、認証情報はGit管理対象外です。
 
@@ -64,7 +69,9 @@ npm run upstream:fetch -- --ref eec0df175504ebd15f0f3e3a8249a18a22f00940
 既に取得したクリーンなBuildCores checkoutも `--repo <path>` で指定できます。
 checkoutのoriginは `https://github.com/buildcores/buildcores-open-db.git` を使用してください。
 
-## 実データでの検証結果
+## 初期9カテゴリの実データ検証結果（履歴）
+
+全30カテゴリの最新ローカル検証は [全カテゴリ対応レポート](docs/all-categories.md) を参照してください。
 
 2026-09-12、上記commit、Node.js 24.16.0 / Wrangler 4.131.1、WindowsのローカルD1で確認済みです。
 
@@ -243,7 +250,7 @@ npm run sync -- --dry-run
 npm run sync
 ```
 
-1. 1つのcommitに固定された全9カテゴリを検証。ファイル名/UUID、取得漏れ、上流Schema違反を確認。
+1. 1つのcommitに固定された全対応カテゴリを検証。カテゴリ/Schema一覧、ファイル名/UUID、取得漏れ、上流Schema違反を確認。
 2. raw JSONの意味内容＋カテゴリ＋normalizer versionのSHA-256と、D1のhashを比較。
 3. 新規・更新・再出現のみUPSERT。変更なしの製品/スペック/identifier/FTSは書き換えない。
 4. すべての変更製品の反映完了後に、上流から消えた製品を `active=0` にする。
@@ -439,6 +446,8 @@ npm run stats
 |生成ファイル|内容|
 |---|---|
 |`.cache/inspection.json`|commit、件数、全検索列の欠損率を計算できる件数、サンプル、検証エラー、カテゴリ間UUID重複|
+|`.cache/upstream-categories.json`|Git treeとSchemaの全カテゴリ照合、未対応カテゴリ|
+|`.cache/all-categories-verification.json`|`npm run verify:catalog`による全カテゴリraw/spec照合、件数、容量、integrity、再同期write不変|
 |`.cache/query-plans.json`|SQL、bound params、EXPLAIN、戻り件数、D1メトリクス|
 |`.cache/sync-report.json`|最後の同期結果（DBのsync_runsにも保存）|
 |`.cache/stats.json`|カテゴリ件数、identifier件数、DB容量、FK検証|
@@ -451,6 +460,7 @@ npm run stats
 `0004_search_relevance.sql`は検索専用FTS列の追加と既存DBの再構築です。
 カタログ正規化規則の変更ではないため、`NORMALIZER_VERSION`は1のままで再同期も不要です。
 `0005_spec_search_indexes.sql`はPhase 2のspec/chipset検索用INDEX追加です。FTS再構築や再同期は不要です。
+`0007_all_categories.sql`は追加21カテゴリの表/INDEX/専用FTSとingest拡張です。既存製品の再書込をせず、追加製品だけをsyncします。
 
 ## Catalog quality audit
 

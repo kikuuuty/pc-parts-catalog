@@ -6,7 +6,7 @@ import { protectSearch, protectHealth, ProtectionError, createRefillGuard } from
 const MAX_BODY = 16 * 1024;
 const MAX_WINDOW = 1000;
 const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'] };
-const fields = ['category', 'keyword', 'filters', 'ranges', 'facets', 'identifier', 'orderBy', 'limit', 'offset'];
+const fields = ['category', 'keyword', 'filters', 'ranges', 'facets', 'identifier', 'orderBy', 'limit', 'offset', 'include'];
 const productFields = ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
 const source = {
   name: 'BuildCores OpenDB', url: 'https://github.com/buildcores/buildcores-open-db',
@@ -38,7 +38,8 @@ function validate(input) {
   keys(input, fields);
   if (!categories.includes(input.category)) invalid('category is required and must be a supported category');
   for (const key of ['keyword', 'orderBy']) if (input[key] !== undefined && !shortText(input[key])) invalid(`${key} must be a nonempty string of at most 200 characters`);
-  const { limit = 20, offset = 0, filters = {}, ranges = {}, facets = {} } = input;
+  const { limit = 20, offset = 0, filters = {}, ranges = {}, facets = {}, include = [] } = input;
+  if (!Array.isArray(include) || include.length > 2 || new Set(include).size !== include.length || include.some(v => !['identifiers', 'facets'].includes(v))) invalid('include accepts identifiers and facets');
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) invalid('limit must be an integer from 1 to 50');
   if (!Number.isInteger(offset) || offset < 0 || offset + limit > MAX_WINDOW) invalid('offset must be nonnegative and offset + limit must not exceed 1000');
   const values = selections(filters, 8) + selections(facets, 4);
@@ -60,7 +61,7 @@ function validate(input) {
     invalid('Invalid search conditions; check keyword tokens, filter fields, types, ranges and orderBy');
   }
   if (query.params.length >= 100) invalid('Search conditions exceed parameter limit');
-  return { category: input.category, limit, offset, query: { sql: `${query.sql} OFFSET ?`, params: [...query.params, offset] } };
+  return { category: input.category, limit, offset, include, query: { sql: `${query.sql} OFFSET ?`, params: [...query.params, offset] } };
 }
 
 async function jsonInput(request) {
@@ -135,6 +136,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
       const execute = async (sql, params = []) => {
         if (!env.DB?.prepare) throw new Error('Missing binding');
         event.d1_queries++;
+        const previous = { rows_read: event.rows_read, rows_written: event.rows_written, duration: event.d1_queries === 1 ? 0 : event.sql_duration_ms };
         // A failed query has unknown cost; only successful D1 metadata establishes it.
         event.rows_read = event.rows_written = null;
         let result;
@@ -147,7 +149,8 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
           throw new HttpError(transient ? 503 : 500, transient ? 'DATABASE_UNAVAILABLE' : 'DATABASE_ERROR', transient ? 'Database temporarily unavailable' : 'Database request failed');
         }
         const meta = result.meta ?? {};
-        Object.assign(event, { rows_read: finite(meta.rows_read), rows_written: finite(meta.rows_written), sql_duration_ms: finite(meta.duration) });
+        const sum = (a, b) => a === null || finite(b) === null ? null : a + b;
+        Object.assign(event, { rows_read: sum(previous.rows_read, meta.rows_read), rows_written: sum(previous.rows_written, meta.rows_written), sql_duration_ms: sum(previous.duration, meta.duration) });
         if (event.sql_duration_ms !== null) headers.set('Server-Timing', `d1;dur=${event.sql_duration_ms}`);
         return result.results;
       };
@@ -178,7 +181,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
             headers.set('Cache-Control', 'public, max-age=60, s-maxage=60');
           } else {
             const input = await searchInput(request, url);
-            const { category, limit, offset, query } = validate(input);
+            const { category, limit, offset, include, query } = validate(input);
             Object.assign(event, { category, limit, offset });
             const policy = request.method === 'GET' ? searchCachePolicy(env, input) : null;
             const cache = injectedCache ?? globalThis.caches?.default;
@@ -201,10 +204,28 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
                 const rows = await execute(query.sql, query.params);
                 const hasMore = rows.length > limit;
                 const nextOffset = hasMore && offset + 2 * limit <= MAX_WINDOW ? offset + limit : null;
+                // Opt-in POST expansion keeps existing GET/cache and default POST
+                // payloads exact. One bounded indexed query covers only this page.
+                const page = rows.slice(0, limit);
+                const extras = new Map(page.map(row => [row.id, Object.fromEntries(include.map(key => [key, key === 'identifiers' ? [] : {}]))]));
+                if (include.length && page.length) {
+                  const ids = page.map(row => row.id);
+                  const binds = ids.map((_, i) => `?${i + 1}`).join(',');
+                  const selections = [];
+                  if (include.includes('identifiers')) selections.push(`SELECT product_id,'identifiers' AS kind,json_object('type',type,'value',value,'region',region,'origin',origin,'origin_field',origin_field) AS payload FROM identifiers WHERE product_id IN (${binds})`);
+                  if (include.includes('facets')) selections.push(`SELECT product_id,'facets' AS kind,json_object('attribute',attribute,'value',value) AS payload FROM product_facets WHERE product_id IN (${binds})`);
+                  for (const row of await execute(`${selections.join(' UNION ALL ')} ORDER BY product_id,kind,payload`, ids)) {
+                    const value = JSON.parse(row.payload);
+                    const item = extras.get(row.product_id);
+                    if (row.kind === 'identifiers') item.identifiers.push(value);
+                    else (item.facets[value.attribute] ??= []).push(value.value);
+                  }
+                }
                 payload = {
-                  data: rows.slice(0, limit).map(row => ({
+                  data: page.map(row => ({
                     ...Object.fromEntries(productFields.map(key => [key, row[key] ?? null])),
                     specs: Object.fromEntries(Object.keys(models[category].fields).map(key => [key, row[key] ?? null])),
+                    ...extras.get(row.id),
                   })),
                   meta: { limit, offset, returned: Math.min(rows.length, limit), has_more: hasMore, next_offset: nextOffset,
                     window_limit: MAX_WINDOW, window_exhausted: hasMore && nextOffset === null, source },

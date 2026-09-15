@@ -57,7 +57,7 @@ export async function loadQualityCatalog(db) {
   for (const model of Object.values(models)) {
     let id = 0;
     while (true) {
-      const rows = (await db.query(`SELECT product_id,${Object.keys(model.fields).map(quoteColumn).join(',')} FROM ${quoteColumn(model.table)} WHERE product_id>? ORDER BY product_id LIMIT 500`, [id])).results;
+      const rows = (await db.query(`SELECT ${['product_id', ...Object.keys(model.fields)].map(quoteColumn).join(',')} FROM ${quoteColumn(model.table)} WHERE product_id>? ORDER BY product_id LIMIT 500`, [id])).results;
       if (!rows.length) break;
       for (const spec of rows) {
         const p = byId.get(spec.product_id);

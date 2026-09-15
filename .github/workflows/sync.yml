@@ -82,5 +82,7 @@ jobs:
           path: |
             .cache/release-*.json
             .cache/sync-report.json
+            .cache/upstream-categories.json
+            .cache/inspection.json
             .cache/notices/
           retention-days: 30

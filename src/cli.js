@@ -93,7 +93,7 @@ async function main() {
   }
   if (command === 'inspect') {
     const snapshot = await loadSnapshot(args.repo);
-    print({ commit: snapshot.commit, counts: Object.fromEntries(Object.entries(snapshot.report.categories).map(([k,v]) => [k,v.count])), report: '.cache/inspection.json' });
+    print({ commit: snapshot.commit, coverage: snapshot.report.coverage, counts: Object.fromEntries(Object.entries(snapshot.report.categories).map(([k,v]) => [k,v.count])), report: '.cache/inspection.json' });
     return;
   }
   if (!['sync','search','stats','plans'].includes(command)) throw new Error('Commands: fetch, inspect, migrate, sync, search, stats, plans, audit-completeness, audit-duplicates, benchmark-search. See README.md');

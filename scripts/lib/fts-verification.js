@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { models } from '../../src/model.js';
+import { models, initialCategories } from '../../src/model.js';
 import { searchQuery } from '../../src/queries.js';
 import { loadSearchFixture } from '../../src/quality/fixtures.js';
 import { catalogState, assertCatalogState } from '../../src/quality/catalog.js';
 
 const protectedTables = ['products', ...Object.values(models).map(m => m.table), 'upstream_identifiers',
-  'local_identifiers', 'local_enrichments', 'upstream_raw', 'product_facets', 'sources', 'categories', 'sync_runs', 'sync_lock'];
+  'local_identifiers', 'local_enrichments', 'upstream_raw', 'product_facets', 'sources', 'categories', 'sync_runs', 'sync_lock',
+  'extended_product_fts', 'local_identifier_fts'];
 const digest = rows => {
   const hash = createHash('sha256');
   for (const row of rows) hash.update(JSON.stringify(row)).update('\n');
@@ -15,16 +16,21 @@ const digest = rows => {
 // Diagnostic only: read-only, bounded pages, no snapshot is written to the DB.
 // Source fingerprints deliberately include timestamps and raw JSON for exact
 // before/after invariance within the same database.
-export async function captureProjection(db, { search = false } = {}) {
+export async function captureProjection(db, { search = false, legacyOnly = false } = {}) {
   const sync = await catalogState(db);
   const tables = {};
+  const legacyScope = initialCategories.map(c => `'${c}'`).join(',');
   for (const table of protectedTables) {
+    if (legacyOnly && Object.entries(models).some(([c, m]) => m.table === table && !initialCategories.includes(c))) continue;
     const columns = (await db.query(`PRAGMA table_info(${table})`)).results.map(r => r.name);
     const hash = createHash('sha256');
     hash.update(JSON.stringify(columns)).update('\n');
     let cursor = 0, count = 0;
     while (true) {
-      const rows = (await db.query(`SELECT rowid AS _cursor,* FROM ${table} WHERE rowid>? ORDER BY rowid LIMIT 500`, [cursor])).results;
+      const scope = !legacyOnly ? '' : table === 'products' ? ` AND category IN (${legacyScope})`
+        : table === 'categories' ? ` AND id IN (${legacyScope})`
+        : columns.includes('product_id') ? ` AND product_id IN (SELECT id FROM products WHERE category IN (${legacyScope}))` : '';
+      const rows = (await db.query(`SELECT rowid AS _cursor,* FROM ${table} WHERE rowid>?${scope} ORDER BY rowid LIMIT 500`, [cursor])).results;
       if (!rows.length) break;
       for (const row of rows) hash.update(JSON.stringify(columns.map(c => row[c]))).update('\n');
       count += rows.length; cursor = rows.at(-1)._cursor;

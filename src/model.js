@@ -1,3 +1,6 @@
+import { legacyNormalizers } from './normalizers/legacy.js';
+import { extendedModels } from './extended-models.js';
+
 // Application search model, NOT a replacement for the upstream JSON Schemas.
 // Index declarations describe the frozen initial migration; later tuning is in 0003.
 export const NORMALIZER_VERSION = 1;
@@ -53,5 +56,13 @@ export const models = {
     indexes: { cooler_type_height: ['water_cooled', 'height_mm', 'product_id'], cooler_radiator: ['radiator_size_mm', 'product_id'] },
   },
 };
+// Freeze the historical migration cohort, independent of future registrations.
+export const initialCategories = Object.keys(models);
+export const legacyFacets = ['memory_type', 'socket', 'motherboard_form_factor', 'psu_form_factor'];
+for (const [category, model] of Object.entries(models)) Object.assign(model, {
+  normalizer: legacyNormalizers[category], facets: legacyFacets,
+  searchFields: ['family', 'generation', 'chipset', 'chip_series'], searchIndex: 'product_fts',
+});
+Object.assign(models, extendedModels);
 export const categories = Object.keys(models);
 export const upstreamCategories = Object.fromEntries(Object.entries(models).map(([k, v]) => [v.upstream, k]));

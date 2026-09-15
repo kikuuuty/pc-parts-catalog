@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { startTail, measure } from './lib/cache-measurement.js';
+import { assertCategories } from './lib/api-contract.js';
 
 const origin = process.argv[2] ?? 'https://pc-parts-catalog.kikuuuty.workers.dev';
 const output = '.cache/cache-production-smoke.json';
@@ -27,7 +28,7 @@ try {
     return sample;
   };
   assert.equal((await check('/v1/health')).body.ok, true);
-  assert.equal((await check('/v1/categories')).body.categories.length, 9);
+  assertCategories((await check('/v1/categories')).body);
   const pages = [];
   for (const offset of [0, 20]) {
     const first = await check(`/v1/search?category=memory&q=ddr5&offset=${offset}`);

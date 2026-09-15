@@ -7,13 +7,14 @@ const { values: args, positionals: [command, left, right] } = parseArgs({ allowP
   remote: { type: 'boolean', default: false }, search: { type: 'boolean', default: false },
   'data-only': { type: 'boolean', default: false }, output: { type: 'string' },
   'order-only': { type: 'boolean', default: false },
+  'legacy-only': { type: 'boolean', default: false },
 } });
 if (!args.output) throw new Error('Specify --output for the verification artifact');
 if (args['data-only'] && args['order-only']) throw new Error('Choose data-only or order-only, not both');
 if (command === 'snapshot') {
   const db = await openDatabase(args.remote);
   try {
-    const report = await captureProjection(db, { search: args.search });
+    const report = await captureProjection(db, { search: args.search, legacyOnly: args['legacy-only'] });
     await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
     console.log(JSON.stringify({ output: args.output, count: report.fts.count, sha256: report.fts.sha256,
       categories: report.fts.categories, counts: report.counts, tables: Object.fromEntries(Object.entries(report.tables).map(([k,v]) => [k,v.count])),

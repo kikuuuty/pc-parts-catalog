@@ -2,12 +2,13 @@ import { spawn, execFile } from 'node:child_process';
 import { openSync, closeSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { createConnection } from 'node:net';
-import { promisify } from 'node:util';
+import { promisify, parseArgs } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 
 // A bounded foreground verification job, not a detached long-lived shell.
 // Reuse an existing catalog server; only stop the process tree we started.
 const origin = 'http://127.0.0.1:8787';
+const { values: args } = parseArgs({ options: { output: { type: 'string', default: '.cache/api-local-production.json' } } });
 const listening = () => new Promise(resolve => {
   const socket = createConnection({ host: '127.0.0.1', port: 8787 });
   const done = value => { socket.destroy(); resolve(value); };
@@ -61,12 +62,12 @@ try {
     }
   }
   if (interrupted) throw new Error('Verification interrupted');
-  console.log('Worker ready. Running paced HTTP/direct-D1 comparison including all 120 Golden Queries (deadline 600s).');
-  verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--smoke', '--golden', '--paced', '--output', '.cache/api-local-production.json'], {
+  console.log('Worker ready. Running paced HTTP/direct-D1 comparison including 120 Golden Queries and 21 new categories (deadline 900s).');
+  verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--smoke', '--golden', '--paced', '--output', args.output], {
     stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
   });
   const exit = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { void stop(verification); reject(new Error('HTTP verification exceeded 600s')); }, 600_000);
+    const timer = setTimeout(() => { void stop(verification); reject(new Error('HTTP verification exceeded 900s')); }, 900_000);
     verification.once('error', error => { clearTimeout(timer); reject(error); });
     verification.once('exit', code => { clearTimeout(timer); resolve(code); });
   });

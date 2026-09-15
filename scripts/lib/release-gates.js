@@ -11,7 +11,7 @@ import { loadSearchFixture } from '../../src/quality/fixtures.js';
 import { benchmarkSearch } from '../../src/quality/benchmark.js';
 import { verifyPlans } from '../../src/queries.js';
 
-export const FTS_GENERATION = 6;
+export const FTS_GENERATION = 7;
 export function productionConfig(config, env = process.env) {
   remoteDatabaseId(config);
   validateProtectionConfig(config);
@@ -72,13 +72,18 @@ export async function readiness(db, { commit, expectedCounts } = {}) {
     const columns = (await db.query(`PRAGMA table_info(${table})`)).results.map(r => r.name);
     assert(Object.keys(models[category].fields).every(field => columns.includes(field)), 'Typed schema/model mismatch');
     assert.equal((await db.query(`SELECT count(*) AS n FROM products p LEFT JOIN ${table} s ON s.product_id=p.id WHERE p.category=? AND s.product_id IS NULL`, [category])).results[0].n, 0, 'Missing typed spec');
+    assert.equal((await db.query(`SELECT count(*) AS n FROM ${table} s LEFT JOIN products p ON p.id=s.product_id WHERE p.id IS NULL OR p.category<>?`, [category])).results[0].n, 0, 'Orphan or wrong-category spec');
   }
-  assert.deepEqual((await db.query('PRAGMA table_info(product_fts)')).results.map(r => r.name), ['text', 'name', 'manufacturer', 'series', 'variant', 'family'], 'FTS generation differs');
   assert.equal((await db.query("SELECT count(*) AS n FROM sqlite_schema WHERE (name='product_search_projection' AND type='view') OR (name='ingest_search_fields' AND type='trigger')")).results[0].n, 2, 'FTS generation objects missing');
-  const drift = (await db.query(`SELECT count(*) AS n FROM product_search_projection p LEFT JOIN product_fts f ON f.rowid=p.product_id
-    WHERE f.rowid IS NULL OR (f.name,f.manufacturer,f.series,f.variant,f.family) IS NOT (p.name,p.manufacturer,p.series,p.variant,p.family)`)).results[0].n;
-  assert.equal(drift, 0, 'FTS projection missing or inconsistent');
-  assert.equal((await db.query('SELECT count(*) AS n FROM product_fts f LEFT JOIN products p ON p.id=f.rowid WHERE p.id IS NULL')).results[0].n, 0, 'Orphan FTS document');
+  for (const index of new Set(Object.values(models).map(m => m.searchIndex))) {
+    const scope = categories.filter(category => models[category].searchIndex === index);
+    assert.deepEqual((await db.query(`PRAGMA table_info(${index})`)).results.map(r => r.name), ['text', 'name', 'manufacturer', 'series', 'variant', 'family'], 'FTS generation differs');
+    const drift = (await db.query(`SELECT count(*) AS n FROM product_search_projection p JOIN products source ON source.id=p.product_id LEFT JOIN ${index} f ON f.rowid=p.product_id
+      WHERE source.category IN (${scope.map(() => '?').join(',')}) AND (f.rowid IS NULL OR (f.name,f.manufacturer,f.series,f.variant,f.family) IS NOT (p.name,p.manufacturer,p.series,p.variant,p.family))`, scope)).results[0].n;
+    assert.equal(drift, 0, 'FTS projection missing or inconsistent');
+    assert.equal((await db.query(`SELECT count(*) AS n FROM ${index} f LEFT JOIN products p ON p.id=f.rowid WHERE p.id IS NULL OR p.category NOT IN (${scope.map(() => '?').join(',')})`, scope)).results[0].n, 0, 'Orphan or wrong-corpus FTS document');
+  }
+  assert.equal((await db.query('SELECT count(*) AS n FROM products p LEFT JOIN upstream_raw r ON r.product_id=p.id WHERE r.product_id IS NULL')).results[0].n, 0, 'Missing upstream raw');
   await assertCatalogState(db, sync);
   return { sync, active, counts, cache_epoch: cacheEpoch(sync) };
 }

@@ -261,7 +261,8 @@ Content-Type: application/json
 }
 ```
 
-POSTはcategory、keyword、filters、ranges、facets、identifier、orderBy、limit、offsetのみ受理する。
+POSTはcategory、keyword、filters、ranges、facets、identifier、orderBy、limit、offset、includeを受理する。
+全カテゴリ拡張とincludeはローカル実装済み・production反映前。適用状況は [全カテゴリ対応レポート](all-categories.md) を参照。
 URLへの追加query parameterは不可。filter/range/facet/identifierの意味とorderBy allowlistは既存検索契約と同じ。
 `990 pro 2tb` のspecはsoft boostで、厳密な容量制約には `ranges` / `filters` を使う。
 
@@ -299,6 +300,9 @@ URLへの追加query parameterは不可。filter/range/facet/identifierの意味
 
 表示例はspecsを省略。実際はcategoryのmodel定義にある全spec列を返し、欠損はnull。
 共通製品列＋specsのallowlistでserializeし、raw、同期内部列、debug score、SQL、paramsは返さない。
+POSTで `"include":["identifiers","facets"]` を指定すると、要求した情報を各製品に追加する。
+identifiersはtype/value/region/origin/origin_fieldの配列、facetsはattributeごとの文字列配列。
+include省略時の既存レスポンスは維持する。共通情報中心のカテゴリのspecsは `{}`。
 `id` はこのDB内のID。DB間の製品比較にはcategoryを含む `upstream_key` を使う。
 API利用サイトはユーザーが確認できる場所にsource attributionを表示する。
 
@@ -306,7 +310,7 @@ API利用サイトはユーザーが確認できる場所にsource attribution�
 
 |入力|上限・契約|
 |---|---|
-|category|必須・modelの9カテゴリのみ|
+|category|必須・model定義にあるカテゴリ（全カテゴリ拡張後30、`/v1/categories`参照）|
 |keyword|非空、最大200 UTF-16 code units、NFKC後1〜12文字/数字tokens|
 |limit|整数1〜50、既定20|
 |offset|非負整数、既定0、offset + limit ≤ 1000|
@@ -316,6 +320,7 @@ API利用サイトはユーザーが確認できる場所にsource attribution�
 |選択値|各field最大10、filters＋facets合計40、文字列最大200文字|
 |ranges|min/maxのみ、有限number、min ≤ max|
 |identifier|value必須・非空200文字以下、typeは既存allowlist|
+|include|POSTのみ・identifiers/facetsの重複なし配列（最大2）。返却pageの取得に最大1 D1 query追加|
 |未知field・不正型|HTTP境界で拒否。debug optionなし|
 
 Content-Lengthだけに依存せず、streamをbyte計測して超過時に中止する。
