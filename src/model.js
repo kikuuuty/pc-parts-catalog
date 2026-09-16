@@ -61,8 +61,12 @@ export const initialCategories = Object.keys(models);
 export const legacyFacets = ['memory_type', 'socket', 'motherboard_form_factor', 'psu_form_factor'];
 for (const [category, model] of Object.entries(models)) Object.assign(model, {
   normalizer: legacyNormalizers[category], facets: legacyFacets,
-  searchFields: ['family', 'generation', 'chipset', 'chip_series'], searchIndex: 'product_fts',
+  searchFields: ['family', 'generation', 'chipset', 'chip_series'],
 });
 Object.assign(models, extendedModels);
 export const categories = Object.keys(models);
+export function ftsName(category) {
+  if (!Object.hasOwn(models, category)) throw new Error(`Unknown category: ${category}`);
+  return `${category}_fts`;
+}
 export const upstreamCategories = Object.fromEntries(Object.entries(models).map(([k, v]) => [v.upstream, k]));

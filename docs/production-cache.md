@@ -329,7 +329,7 @@ node scripts/measure-cache-ttl.js 60
 node scripts/measure-cache-ttl.js 600
 # 最後にwrangler.jsonの300秒/最新epochへ戻し通常deploy
 npm run worker:deploy
-npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --golden-only --cache-repeat --baseline .cache/search-fts-remote-after.json --output .cache/api-cache-golden.json
+npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --golden-only --cache-repeat --output .cache/api-cache-golden.json
 node scripts/verify-cache-smoke.js
 node scripts/report-api-cache.js
 ```

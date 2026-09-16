@@ -131,11 +131,12 @@ test('search index migration changes neither catalog values nor FTS, and spec qu
   const before=snapshot();
   db.sqlite.exec(readFileSync(new URL('../migrations/0005_spec_search_indexes.sql',import.meta.url),'utf8'));
   assert.deepEqual(snapshot(),before);
+  for (const name of ['0006_fts_projection_consistency.sql','0007_all_categories.sql','0008_category_fts.sql']) db.sqlite.exec(readFileSync(new URL(`../migrations/${name}`,import.meta.url),'utf8'));
   const values=Array(20).fill('Example');
   const q=searchQuery('memory',{keyword:'ddr5 6000 cl30 32gb',filters:{manufacturer:values,series:values,variant:values,ecc:values,registered:Array(16).fill('Unbuffered')}});
   assert.equal(q.params.length,100);
   await db.query(q.sql,q.params);
-  // Full-scan assertions run on the real D1 via verify:plans/measure-search-phase2.
+  // Full-scan assertions run on local D1 via verify:plans/verify:search:local.
   // SQLite legitimately prefers a scan of this one-row synthetic table after ANALYZE.
 });
 

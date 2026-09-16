@@ -14,8 +14,8 @@ export function assertSearchContract(body, { category, limit = 20, offset = 0 })
   assert(m.returned >= 0 && m.returned <= limit);
   assert.equal(typeof m.has_more, 'boolean');
   if (m.has_more) assert.equal(m.returned, limit);
-  assert.equal(m.window_limit, 1000);
-  const next = m.has_more && offset + limit * 2 <= 1000 ? offset + limit : null;
+  assert([1000,100000].includes(m.window_limit));
+  const next = m.has_more && offset + limit * 2 <= m.window_limit ? offset + limit : null;
   assert.equal(m.next_offset, next);
   assert.equal(m.window_exhausted, m.has_more && next === null);
   assert.equal(m.source.name, 'BuildCores OpenDB');

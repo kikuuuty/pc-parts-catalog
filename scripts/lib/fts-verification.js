@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import { models, initialCategories } from '../../src/model.js';
+import { models, ftsName } from '../../src/model.js';
 import { searchQuery } from '../../src/queries.js';
 import { loadSearchFixture } from '../../src/quality/fixtures.js';
 import { catalogState, assertCatalogState } from '../../src/quality/catalog.js';
 
 const protectedTables = ['products', ...Object.values(models).map(m => m.table), 'upstream_identifiers',
   'local_identifiers', 'local_enrichments', 'upstream_raw', 'product_facets', 'sources', 'categories', 'sync_runs', 'sync_lock',
-  'extended_product_fts', 'local_identifier_fts'];
+  'product_search_documents', 'local_identifier_fts'];
 const digest = rows => {
   const hash = createHash('sha256');
   for (const row of rows) hash.update(JSON.stringify(row)).update('\n');
@@ -16,38 +16,35 @@ const digest = rows => {
 // Diagnostic only: read-only, bounded pages, no snapshot is written to the DB.
 // Source fingerprints deliberately include timestamps and raw JSON for exact
 // before/after invariance within the same database.
-export async function captureProjection(db, { search = false, legacyOnly = false } = {}) {
+export async function captureProjection(db, { search = false } = {}) {
   const sync = await catalogState(db);
   const tables = {};
-  const legacyScope = initialCategories.map(c => `'${c}'`).join(',');
   for (const table of protectedTables) {
-    if (legacyOnly && Object.entries(models).some(([c, m]) => m.table === table && !initialCategories.includes(c))) continue;
     const columns = (await db.query(`PRAGMA table_info(${table})`)).results.map(r => r.name);
     const hash = createHash('sha256');
     hash.update(JSON.stringify(columns)).update('\n');
     let cursor = 0, count = 0;
     while (true) {
-      const scope = !legacyOnly ? '' : table === 'products' ? ` AND category IN (${legacyScope})`
-        : table === 'categories' ? ` AND id IN (${legacyScope})`
-        : columns.includes('product_id') ? ` AND product_id IN (SELECT id FROM products WHERE category IN (${legacyScope}))` : '';
-      const rows = (await db.query(`SELECT rowid AS _cursor,* FROM ${table} WHERE rowid>?${scope} ORDER BY rowid LIMIT 500`, [cursor])).results;
+      const rows = (await db.query(`SELECT rowid AS _cursor,* FROM ${table} WHERE rowid>? ORDER BY rowid LIMIT 500`, [cursor])).results;
       if (!rows.length) break;
       for (const row of rows) hash.update(JSON.stringify(columns.map(c => row[c]))).update('\n');
       count += rows.length; cursor = rows.at(-1)._cursor;
     }
     tables[table] = { count, sha256: hash.digest('hex'), columns };
   }
-  const fields = (await db.query('PRAGMA table_info(product_fts)')).results.map(r => r.name);
-  if (JSON.stringify(fields) !== JSON.stringify(['text', 'name', 'manufacturer', 'series', 'variant', 'family'])) throw new Error('FTS schema changed; review fingerprint format');
+  const fields = ['text', 'name', 'manufacturer', 'series', 'variant', 'family'];
   const rows = [];
+  for (const category of Object.keys(models)) {
   let cursor = 0;
   while (true) {
     const page = (await db.query(`SELECT f.rowid AS id,p.category,p.upstream_key,${fields.map(c => `f.${c}`).join(',')}
-      FROM product_fts f LEFT JOIN products p ON p.id=f.rowid WHERE f.rowid>? ORDER BY f.rowid LIMIT 500`, [cursor])).results;
+      FROM ${ftsName(category)} f LEFT JOIN products p ON p.id=f.rowid WHERE f.rowid>? ORDER BY f.rowid LIMIT 500`, [cursor])).results;
     if (!page.length) break;
     for (const row of page) rows.push([row.id, row.category, row.upstream_key, ...fields.map(c => row[c])]);
     cursor = page.at(-1).id;
   }
+  }
+  rows.sort((a,b)=>a[0]-b[0]);
   const categories = {};
   for (const category of Object.keys(models)) {
     const subset = rows.filter(r => r[1] === category);

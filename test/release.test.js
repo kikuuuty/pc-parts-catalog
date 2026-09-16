@@ -45,7 +45,7 @@ test('retry reuses completed sync only after comparing DB hashes; partial and fa
   assert.equal(repeat.updated, 0);
   assert.equal(repeat.unchanged, 1);
   assert.equal((await db.query('SELECT count(*) AS n FROM sync_runs')).results[0].n, 1);
-  assert.equal(cacheEpoch(await catalogState(db)), `sync-${first.run_id}-fts${FTS_GENERATION}-cache1`);
+  assert.equal(cacheEpoch(await catalogState(db)), `sync-${first.run_id}-fts${FTS_GENERATION}-cache2`);
   db.sqlite.exec("UPDATE products SET content_hash='interrupted-write'");
   const resumed = await syncSnapshot(db, snapshot, { reuseComplete: true });
   assert.notEqual(resumed.run_id, first.run_id);
@@ -92,7 +92,7 @@ test('epoch tracks snapshot/projection/cache generations, not workflow attempts'
   const sync = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', status: 'complete' };
   assert.equal(cacheEpoch(sync), cacheEpoch({ ...sync, attempt: 99 }));
   assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION + 1));
-  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION, 'v2'));
+  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION, 'v3'));
   assert.throws(() => cacheEpoch({ ...sync, status: 'partial' }));
 });
 
@@ -106,14 +106,17 @@ test('production config rejects mismatched remote overrides, retains TTL and che
   assert.throws(() => assertDeployedVars({ bindings: bindings.slice(1) }, config.vars));
 });
 
-test('Golden gate fails on an individual regression even when others improve', () => {
-  const report = { fixture_sha256: '68d4f73da2ba143c06b5307cd84b97cb232db6489fbcee77b94e9974d925bfb7', results: Array.from({ length: 120 }, (_, i) => ({ id: `case-${i}`, status: 'HIT', rank: 1 })) };
+test('UX gate rejects identifier errors, contamination, review debt and missing coverage, not browse rank movement', () => {
+  const report = { results: ['lookup','identifier','browse','browse_filter','filter_only'].map(intent => ({ id:intent,intent,rank:1,
+    rows_read:100,sql_duration_ms:1,relevant_count:5,recall_at_20:1,precision_at_20:1,filter_correctness:true,
+    exact_set_equality:true,pagination_correctness:true })) };
   assertGolden(report);
-  for (const change of [{ rank: 2 }, { status: 'MISSING_PRODUCT' }, { acceptable: {}, precision_at_5: 0.8, precision_at_10: 1 }]) {
-    const bad = structuredClone(report); Object.assign(bad.results[0], change);
+  report.results[2].rank=999; assertGolden(report);
+  for (const [index,change] of [[1,{rank:2}],[2,{precision_at_20:.5}],[3,{false_positive_count:1}],[4,{pagination_correctness:false}],[0,{review:'pending'}]]) {
+    const bad = structuredClone(report); Object.assign(bad.results[index], change);
     assert.throws(() => assertGolden(bad));
   }
-  assert.throws(() => assertGolden({ ...report, fixture_sha256: 'candidate-generated' }));
+  assert.throws(() => assertGolden({results:[]}));
 });
 
 test('readiness rejects missing migration, unfinished latest sync and abnormal catalog count', async t => {

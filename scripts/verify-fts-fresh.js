@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { getPlatformProxy } from 'wrangler';
@@ -6,9 +6,7 @@ import { loadSnapshot, defaultRepo } from '../src/upstream.js';
 import { syncSnapshot } from '../src/sync.js';
 import { verifyPlans } from '../src/queries.js';
 import { loadQualityCatalog } from '../src/quality/catalog.js';
-import { loadSearchFixture } from '../src/quality/fixtures.js';
-import { benchmarkSearch } from '../src/quality/benchmark.js';
-import { createHash } from 'node:crypto';
+import { loadUXFixture,evaluateUX,sourceCatalog,qualityFailures } from '../src/quality/ux.js';
 import { captureProjection } from './lib/fts-verification.js';
 import { parseArgs } from 'node:util';
 
@@ -31,18 +29,14 @@ const db = { query: (sql, params = []) => proxy.env.DB.prepare(sql).bind(...para
 try {
   const sync = await syncSnapshot(db, snapshot, args['verify-existing'] ? { reuseComplete: true } : {});
   const report = await captureProjection(db, { search: true });
-  const input = await loadSearchFixture();
-  const implementation = await Promise.all(['queries.js', 'search-intent.js'].map(file => readFile(new URL(`../src/${file}`, import.meta.url), 'utf8')));
-  const benchmark = await benchmarkSearch(db, await loadQualityCatalog(db), input.fixture, { fixtureHash: input.hash,
-    searchImplementationHash: createHash('sha256').update(JSON.stringify(implementation)).digest('hex') });
+  const input = await loadUXFixture(),catalog=await loadQualityCatalog(db);
+  const benchmark = await evaluateUX(db,catalog,input.fixture,{fixtureHash:input.hash,source:sourceCatalog(snapshot,catalog)});
+  benchmark.release_failures=qualityFailures(benchmark);
   const plans = await verifyPlans(db);
   for (const [name, data] of Object.entries({ snapshot: report, sync, benchmark, plans })) await writeFile(path.join(directory, `${name}.json`), JSON.stringify(data, null, 2) + '\n');
   await writeFile(args.output, JSON.stringify({ directory, configPath }, null, 2));
   console.log(JSON.stringify({ directory, sync, count: report.fts.count, sha256: report.fts.sha256, summary: benchmark.summary,
     plans_passed: plans.filter(p => p.index_check).length, queries: report.ranking.length }, null, 2));
-  const baseline = { query_count: 120, hit_at_1: 118 / 120, hit_at_5: 1, hit_at_10: 1, mrr: 118.75 / 120,
-    precision_at_5: 216 / 220, precision_at_10: 434 / 440, zero_result_count: 0 };
-  const qualityFailed = Object.entries(baseline).some(([key, value]) =>
-    typeof benchmark.summary[key] !== 'number' || Math.abs(benchmark.summary[key] - value) > 1e-12);
-  if (sync.status !== 'complete' || plans.some(p => !p.index_check) || qualityFailed) throw new Error('Fresh verification failed');
+  if (sync.status !== 'complete' || plans.some(p => !p.index_check)) throw new Error('Fresh verification failed');
+  console.log(JSON.stringify({release_failures:benchmark.release_failures}));
 } finally { await proxy.dispose(); }

@@ -119,4 +119,4 @@ spec/identityの列名はparserのallowlistと`models`で制限し、ユーザ�
 FTSとtyped INDEXの候補→products/spec PKという経路でランキングする。
 補助取得に上限を付けても、literalな広いFTS queryは多数候補を返すため、すべての検索費用が一定になるわけではない。
 
-評価定義は[search-evaluation-phase2.md](search-evaluation-phase2.md)、実測は[search-quality-phase2.md](search-quality-phase2.md)。
+評価定義は[UX評価契約](search-evaluation.md)、実測は[ローカル検証](category-search-validation.md)。

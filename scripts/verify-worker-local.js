@@ -62,7 +62,7 @@ try {
     }
   }
   if (interrupted) throw new Error('Verification interrupted');
-  console.log('Worker ready. Running paced HTTP/direct-D1 comparison including 120 Golden Queries and 21 new categories (deadline 900s).');
+  console.log('Worker ready. Running intent-suite HTTP/direct-D1 comparison and 30-category Detail contract (deadline 900s).');
   verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--smoke', '--golden', '--paced', '--output', args.output], {
     stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
   });

@@ -1,5 +1,5 @@
 // Explanatory reproduction of FTS5's BM25 for a lexical expression consisting of
-// unscoped quoted AND/OR phrases (the corpus experiment's compact-model case).
+// unscoped quoted AND/OR phrases, including compact-model query expansion.
 // This is a diagnostic, never a replacement ranking implementation.
 import assert from 'node:assert/strict';
 const weights={text:.1,name:10,manufacturer:2,series:4,variant:3,family:4};

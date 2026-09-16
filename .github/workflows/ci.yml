@@ -25,7 +25,9 @@ jobs:
         run: npm run verify:catalog
       - run: npm run audit:completeness -- --output .cache/completeness.json
       - run: npm run audit:duplicates -- --output .cache/duplicates.json
-      - name: Enforce production Golden floors and dry-run release config
+      - name: Record source-grounded search intent metrics
+        run: npm run benchmark:search -- --output .cache/search-ux.json
+      - name: Enforce intent release gates and dry-run release config
         run: npm run release:verify -- --local
       - uses: actions/upload-artifact@v4
         if: always()
@@ -40,4 +42,5 @@ jobs:
             .cache/completeness.json
             .cache/duplicates.json
             .cache/release-verify-report.json
+            .cache/search-ux.json
           retention-days: 7

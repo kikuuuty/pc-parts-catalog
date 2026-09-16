@@ -342,7 +342,7 @@ npm run worker:deploy
 
 # 他の検証と同時実行しない。cold keyにはTTL経過を使う。
 node scripts/measure-api-protection.js --phase after --compare .cache/rate-before.json --output .cache/rate-after-inflight.json --cold-wait-seconds 305
-npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --golden-only --cache-repeat --paced --baseline .cache/search-fts-remote-after.json --output .cache/api-rate-golden.json
+npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --golden-only --cache-repeat --paced --output .cache/api-rate-golden.json
 # restricted resource budgetを使い切る可能性がある小規模運用probe。完了後は60秒以上あける。
 node scripts/verify-rate-smoke.js
 node scripts/verify-cache-smoke.js

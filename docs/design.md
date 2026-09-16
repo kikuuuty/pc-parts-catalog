@@ -37,8 +37,8 @@
 
 ## 検索モデル
 
-内部カテゴリ: `cpu`, `memory`, `motherboard`, `gpu`, `storage`, `psu`, `case`, `case_fan`, `cpu_cooler`。
-表示名は `categories` に CPU/MEM/M/B/GPU/Storage/PSU/Case/Case Fan/CPU Cooler を保持。
+内部カテゴリはregistryの全30カテゴリ。[カテゴリ別FTS一覧](category-search.md)を参照。
+以下の上流調査例は初期9カテゴリの調査履歴で、検索routingの区分ではない。
 
 - `products`: INTEGER主キー、(source, upstream_key)一意、基本情報、active、content_hash、変更commit。
   upstream_idは元UUID、upstream_keyは `<上流カテゴリ>/<UUID>`。
@@ -46,7 +46,7 @@
   前者はMSI MEG CORELIQUID E15 360 OEM FAN、後者は水冷クーラー本体で内容も異なる。
   UUIDだけで統合せず両方を保持し、inspection reportにカテゴリ間重複を記録する。
   カテゴリ移動は旧製品の論理削除＋新製品。独自補完情報の移し替えは根拠を確認した上で別途行う。
-- 9個の1:1スペックテーブル: 数値はINTEGER/REAL。カテゴリはテーブル自体で限定されるためINDEXに重ねて持たない。
+- 30個の1:1スペックテーブル: 数値はINTEGER/REAL。カテゴリはテーブル自体で限定されるためINDEXに重ねて持たない。
 - `product_facets`: CPU対応メモリ、クーラーsocket、ケース対応M/B・PSU形式の多値属性のみ。
 - `upstream_identifiers` / `local_identifiers`: 物理的に分離。`identifiers` view でorigin付きUNION ALL。
   同じidentifierが複数製品を指すことを許容し、誤って製品を統合しない。raw valueと完全一致用value_keyを保存。
@@ -107,8 +107,8 @@ ORDER BYと揃えた。INDEX数は増やしていない。クーラーは型付�
 
 ## 同期と運用
 
-Node.js 24 ESM、Ajv、Wrangler。UI/API Workerのデプロイは不要。
-取得はGit shallow clone/fetchで1つのcommitに固定。全9カテゴリとSchemaを検証してからD1を書き込む。
+Node.js 24 ESM、Ajv、Wrangler。ローカル検証はproduction deploy不要。
+取得はGit shallow clone/fetchで1つのcommitに固定。全30カテゴリとSchemaを検証してからD1を書き込む。
 ファイル欠落/UUID不一致/同カテゴリ内キー重複/Schema違反時は同期全体を停止し、削除判定をしない。
 変更対象はraw JSON+normalizer versionのSHA-256とD1のhashを比較して決める。
 初回/更新/再出現は同じUPSERT経路。上流から消えた製品はactive=0、独自データや主キーは保持する。

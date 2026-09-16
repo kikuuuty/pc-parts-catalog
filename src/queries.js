@@ -1,8 +1,8 @@
-import { models } from './model.js';
+import { models, ftsName } from './model.js';
 import { identifierKey } from './normalize.js';
 import { parseSearchIntent, specSeed } from './search-intent.js';
 
-const common = { manufacturer: 'TEXT', series: 'TEXT', variant: 'TEXT', release_year: 'INTEGER' };
+const common = { name: 'TEXT', manufacturer: 'TEXT', series: 'TEXT', variant: 'TEXT', release_year: 'INTEGER' };
 const productColumns = ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
 const productProjection = `${productColumns.map(field => `p.${field}`).join(',')},s.*`;
 // Immutable schema-derived SQL fragments, not a query/result cache. Reuse them
@@ -97,6 +97,8 @@ export function searchTerms(value) {
 export function searchQuery(category, { keyword, filters = {}, ranges = {}, facets = {}, identifier, limit = 20, orderBy, debug = false } = {}) {
   if (typeof category !== 'string' || !Object.hasOwn(models, category)) throw new Error(`Unknown category: ${category}`);
   const model = models[category];
+  const index = ftsName(category);
+  if (orderBy === 'relevance') orderBy = undefined;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be 1–100');
   const fields = { ...common, ...model.fields };
   const column = key => {
@@ -147,7 +149,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   }
   let withSQL = '';
   let from = `products p JOIN ${model.table} s ON s.product_id=p.id`;
-  // New categories can stream an explicitly filtered, indexed sort before PK
+  // Models with an order-leading index can stream a filtered sort before PK
   // product/facet probes. This avoids fresh-statistics category-first sorting.
   if (model.indexedOrderFirst && orderBy && (Object.hasOwn(filters, orderBy) || Object.hasOwn(ranges, orderBy))
       && Object.values(model.indexes).some(columns => columns[0] === orderBy)) {
@@ -178,8 +180,8 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     const key = `?${params.length+2}`;
     params.push(JSON.stringify(terms), identifierKey(keyword));
     const value = path => `(SELECT json_extract(q,'$.${path}') FROM search_input)`;
-    const fts = (mode, guard = '') => `SELECT rowid AS id,-bm25(product_fts,0.1,10,2,4,3,4) AS relevance
-        FROM product_fts WHERE ${guard}product_fts MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}
+    const fts = (mode, guard = '') => `SELECT rowid AS id,-bm25(${index},0.1,10,2,4,3,4) AS relevance
+        FROM ${index} WHERE ${guard}${index} MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}
       UNION ALL SELECT i.product_id,0 FROM local_identifier_fts JOIN local_identifiers i ON i.id=local_identifier_fts.rowid
         WHERE ${guard}local_identifier_fts MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}`;
     // Both joins are PK lookups: each hit ID determines exactly one product/spec
@@ -192,7 +194,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
       FROM (SELECT id,max(relevance) AS relevance FROM ${hits} GROUP BY id) h
       CROSS JOIN products p ON p.id=h.id CROSS JOIN ${model.table} s ON s.product_id=p.id
       WHERE ${scoped}`;
-    const matches = field => `p.id IN (SELECT rowid FROM product_fts WHERE product_fts MATCH
+    const matches = field => `p.id IN (SELECT rowid FROM ${index} WHERE ${index} MATCH
       ${terms.fallback ? `CASE WHEN NOT EXISTS (SELECT 1 FROM strict) THEN ${value(`fallback.${field}`)} ELSE ${value(`strict.${field}`)} END` : value(`strict.${field}`)})`;
     // CASE is first-match wins. A later identical MATCH predicate is unreachable
     // after an earlier false result; keep only the first (highest-priority) tier.
@@ -209,11 +211,11 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     const identityCondition = intent.identity ? `s.chipset IN (SELECT value FROM json_each(${value('intent.identity.values')}))` : '0';
     const familyCondition = intent.family ? `s.family=${value('intent.family')}` : '0';
     const typed = intent.identity ? `UNION ALL SELECT s.product_id,0 FROM ${model.table} s WHERE ${identityCondition}
-        ${intent.identity.residual ? `AND EXISTS (SELECT 1 FROM product_fts WHERE rowid=s.product_id AND product_fts MATCH ${value('identityResidual')})` : ''}`
+        ${intent.identity.residual ? `AND EXISTS (SELECT 1 FROM ${index} WHERE rowid=s.product_id AND ${index} MATCH ${value('identityResidual')})` : ''}`
       : (intent.specOnly || boundedLexical) && seed ? `UNION ALL SELECT id,0 FROM (
           SELECT s.product_id AS id FROM ${model.table} s CROSS JOIN products p ON p.id=s.product_id
           WHERE ${specConditions.join(' AND ')} AND ${scoped}
-          ${boundedLexical ? `AND s.product_id IN (SELECT rowid FROM product_fts WHERE product_fts MATCH ${value('strict.prefix')})` : ''}
+          ${boundedLexical ? `AND s.product_id IN (SELECT rowid FROM ${index} WHERE ${index} MATCH ${value('strict.prefix')})` : ''}
           ORDER BY ${seed.order.map(field=>`s.${field}`).join(',')} LIMIT 256
         )` : '';
     const specScore = intent.specs.length ? `(${specConditions.map((condition,i) => `CASE WHEN ${condition} THEN 1.0 WHEN s.${intent.specs[i].field} IS NULL THEN 0.25 ELSE 0 END`).join('+')}) * ${12/intent.specs.length}` : '0';
@@ -227,7 +229,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     // view at all. Keep the key parameter slot even in the empty branch.
     const exactIdentifiers = terms.identifierKind ? `SELECT DISTINCT product_id FROM identifiers WHERE value_key=${key} AND
       ${terms.identifierKind === 'mpn' ? "type='mpn'" : "type IN ('gtin','ean','upc','jan')"}
-      AND EXISTS (SELECT 1 FROM product_fts WHERE rowid=identifiers.product_id)`
+      AND EXISTS (SELECT 1 FROM ${index} WHERE rowid=identifiers.product_id)`
       : `SELECT NULL AS product_id WHERE 0 AND ${key} IS NULL`;
     const ranking = rankColumns(`SELECT c.*, CASE
           WHEN c.fallback=0 AND p.id IN (SELECT product_id FROM trusted_identifiers) THEN 800
@@ -266,7 +268,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   params.push(limit);
   if (params.length > 100) throw new Error('D1 supports at most 100 bound parameters');
   return {
-    sql: `${withSQL}SELECT ${projection}${diagnostics} FROM ${from} WHERE ${predicates} ORDER BY ${order} LIMIT ?`.replaceAll('product_fts', model.searchIndex),
+    sql: `${withSQL}SELECT ${projection}${diagnostics} FROM ${from} WHERE ${predicates} ORDER BY ${order} LIMIT ?`,
     params,
   };
 }

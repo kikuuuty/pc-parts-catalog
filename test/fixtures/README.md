@@ -1,50 +1,27 @@
-# Golden search queries
+# Golden fixture assets
 
-`search-benchmark.json` is a manually selected set of user intents grounded in the
-local catalog at BuildCores commit `eec0df175504ebd15f0f3e3a8249a18a22f00940`.
-IDs and identifiers were checked against `products` / `identifiers` using the existing
-DB adapter. Broad family queries list the relevant IDs observed in that snapshot;
-expectations were **not** generated from search result rankings.
+`search-benchmark.json` (40), `search-regression-labels.json` and
+`search-phase2.json` (80) preserve the original 120 source-grounded cases.
+`search-extended.json` preserves 102 cases for the other 21 categories.
+`search-extended-evidence.json` preserves their source paths, identifiers,
+specs/facets and independent relevant sets. The source commit is
+`eec0df175504ebd15f0f3e3a8249a18a22f00940`.
 
-Examples with no spaces (`rtx5080`, `990pro`) and `gaming x trio 5080` deliberately
-exercise user shorthand. The latter targets the existing MSI GAMING TRIO OC 5080;
-it does not assert that an independently verified "Gaming X Trio 5080" SKU exists.
+`loadUXFixture()` reclassifies these into lookup, identifier, browse and
+browse_filter without changing query or expected. `search-ux.json` adds 11
+frontend cases, including MAG → ATX → AMD B850, OLED/size/resolution, filter-only
+DDR5/32GB, and an intentional empty filter result.
 
-`upstream_ids` and `anyOf` are explicit acceptable-product sets: the first returned
-member determines rank. Each single selector must resolve to at most one product.
-Do not silently relax an ambiguous MPN/name expectation; review the conflicting
-records and use explicit stable IDs. See README.md for fixture syntax and metrics.
+Relevant sets are resolved from source data, never search order. Lookup may use
+explicit equivalent SKU sets; browse uses relevant sets, not a single expected
+rank. Rank movement within a relevant browse set is not a regression.
+All 102 extended judgments remain **pending human review** and block release.
+`scripts/prepare-extended-golden.js` checks source evidence and refuses to
+overwrite frozen fixtures. Expected IDs must not be auto-adjusted to rankings.
 
-Phase 2 keeps this legacy file byte-identical. `search-regression-labels.json` adds
-class/precision metadata without overriding queries or expectations.
-`search-phase2.json` contains 80 catalog-grounded additions: 52 development and 28
-holdout cases, frozen before search implementation changes. The default benchmark
-loads all 120 cases; `--suite` and `--class` select evaluations.
-Explicit `{ "set": { "fields": { "spec.family": "Ryzen 7" } } }` selectors resolve
-groups using evaluation-only typed predicates. An optional `acceptable` selector
-defines Precision@5/10 with a fixed K denominator (missing slots count as nonrelevant).
-See [the evaluation contract](../../docs/search-evaluation-phase2.md) for evidence,
-scope, classes, limitations, and fixture hashes.
-
-## Independent extended suite
-
-`search-extended.json` contains 102 snapshot-grounded cases for the additional 21
-categories. It is loaded explicitly, never appended to the default frozen 120.
-`search-extended-evidence.json` records stable upstream keys, source paths, names,
-identifiers, specs/facets and complete relevant-product lists for source-only group
-judgments. Its independent SHA-256 is
-`0159fb0832226c96918e2d24052e5917ea357069cac71999d0284a5c5c28f4be`.
-
-These initial extended judgments are **pending human review**, with no generated
-rank/precision floor. Two exact/manufacturer cases share their search input;
-review that weighting as well as same-model SKU/bundle ambiguity. The source recipe
-`scripts/prepare-extended-golden.js` has no search-results input. Its default mode
-checks frozen bytes, and `--write` refuses to overwrite existing fixtures.
-
-See [the corpus experiment](../../docs/fts-corpus-experiment.md) for A/B measurements,
-BM25 counterfactuals, recall/overlap definitions, per-category/class results and the
-decision to retain the production 2-FTS design.
+See [the evaluation contract](../../docs/search-evaluation.md) for denominators,
+metrics, floors, pagination and review policy.
 
 Contains information from [BuildCores OpenDB](https://github.com/buildcores/buildcores-open-db),
-which is made available under the [ODC Attribution License](https://opendatacommons.org/licenses/by/1-0/).
-Preserve [NOTICE.md](../../NOTICE.md) with this fixture when redistributing it.
+made available under [ODC-By 1.0](https://opendatacommons.org/licenses/by/1-0/).
+Preserve [NOTICE.md](../../NOTICE.md) when redistributing fixtures.

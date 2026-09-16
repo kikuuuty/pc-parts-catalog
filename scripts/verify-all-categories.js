@@ -8,6 +8,7 @@ import { syncSnapshot } from '../src/sync.js';
 import { searchQuery } from '../src/queries.js';
 import { readiness } from './lib/release-gates.js';
 import { captureProjection, compareProjection } from './lib/fts-verification.js';
+import { ftsIntegrity } from './lib/fts-integrity.js';
 
 const { values: args } = parseArgs({ options: {
   repo: { type: 'string', default: defaultRepo }, output: { type: 'string', default: '.cache/all-categories-verification.json' },
@@ -98,9 +99,7 @@ try {
     identifiers: await count('SELECT count(*) AS n FROM identifiers'),
     upstream_identifiers: await count('SELECT count(*) AS n FROM upstream_identifiers'),
     local_identifiers: await count('SELECT count(*) AS n FROM local_identifiers'),
-    fts: await count('SELECT (SELECT count(*) FROM product_fts)+(SELECT count(*) FROM extended_product_fts) AS n'),
-    legacy_fts: await count('SELECT count(*) AS n FROM product_fts'),
-    extended_fts: await count('SELECT count(*) AS n FROM extended_product_fts'),
+    fts: await ftsIntegrity(db),
     size_bytes: after.size_bytes,
     raw_bytes: Object.values(categories).reduce((n, r) => n + r.raw_bytes, 0),
   };

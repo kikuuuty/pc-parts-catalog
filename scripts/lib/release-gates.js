@@ -7,11 +7,13 @@ import { validateProtectionConfig } from '../../src/search-protection.js';
 import { CACHE_SCHEMA_GENERATION } from '../../src/search-cache.js';
 import { NORMALIZER_VERSION, categories, models } from '../../src/model.js';
 import { catalogState, assertCatalogState, loadQualityCatalog } from '../../src/quality/catalog.js';
-import { loadSearchFixture } from '../../src/quality/fixtures.js';
-import { benchmarkSearch } from '../../src/quality/benchmark.js';
+import { loadUXFixture, evaluateUX, qualityFailures, sourceCatalog } from '../../src/quality/ux.js';
+import { loadSnapshot } from '../../src/upstream.js';
+import { verifySourceCatalog } from '../../src/quality/integrity.js';
+import { ftsIntegrity } from './fts-integrity.js';
 import { verifyPlans } from '../../src/queries.js';
 
-export const FTS_GENERATION = 7;
+export const FTS_GENERATION = 8;
 export function productionConfig(config, env = process.env) {
   remoteDatabaseId(config);
   validateProtectionConfig(config);
@@ -74,45 +76,28 @@ export async function readiness(db, { commit, expectedCounts } = {}) {
     assert.equal((await db.query(`SELECT count(*) AS n FROM products p LEFT JOIN ${table} s ON s.product_id=p.id WHERE p.category=? AND s.product_id IS NULL`, [category])).results[0].n, 0, 'Missing typed spec');
     assert.equal((await db.query(`SELECT count(*) AS n FROM ${table} s LEFT JOIN products p ON p.id=s.product_id WHERE p.id IS NULL OR p.category<>?`, [category])).results[0].n, 0, 'Orphan or wrong-category spec');
   }
-  assert.equal((await db.query("SELECT count(*) AS n FROM sqlite_schema WHERE (name='product_search_projection' AND type='view') OR (name='ingest_search_fields' AND type='trigger')")).results[0].n, 2, 'FTS generation objects missing');
-  for (const index of new Set(Object.values(models).map(m => m.searchIndex))) {
-    const scope = categories.filter(category => models[category].searchIndex === index);
-    assert.deepEqual((await db.query(`PRAGMA table_info(${index})`)).results.map(r => r.name), ['text', 'name', 'manufacturer', 'series', 'variant', 'family'], 'FTS generation differs');
-    const drift = (await db.query(`SELECT count(*) AS n FROM product_search_projection p JOIN products source ON source.id=p.product_id LEFT JOIN ${index} f ON f.rowid=p.product_id
-      WHERE source.category IN (${scope.map(() => '?').join(',')}) AND (f.rowid IS NULL OR (f.name,f.manufacturer,f.series,f.variant,f.family) IS NOT (p.name,p.manufacturer,p.series,p.variant,p.family))`, scope)).results[0].n;
-    assert.equal(drift, 0, 'FTS projection missing or inconsistent');
-    assert.equal((await db.query(`SELECT count(*) AS n FROM ${index} f LEFT JOIN products p ON p.id=f.rowid WHERE p.id IS NULL OR p.category NOT IN (${scope.map(() => '?').join(',')})`, scope)).results[0].n, 0, 'Orphan or wrong-corpus FTS document');
-  }
+  const integrity = await ftsIntegrity(db);
+  assert(integrity.pass, 'Category FTS integrity failed');
   assert.equal((await db.query('SELECT count(*) AS n FROM products p LEFT JOIN upstream_raw r ON r.product_id=p.id WHERE r.product_id IS NULL')).results[0].n, 0, 'Missing upstream raw');
   await assertCatalogState(db, sync);
   return { sync, active, counts, cache_epoch: cacheEpoch(sync) };
 }
 
-// Recorded Phase 2 acceptance, docs/search-quality-phase2.md. These are floors,
-// never regenerated from the candidate. Improvements cannot offset regressions.
+// Intent-specific floors, not exact rank/fingerprint invariance.
 export function assertGolden(report) {
-  assert.equal(report.fixture_sha256, '68d4f73da2ba143c06b5307cd84b97cb232db6489fbcee77b94e9974d925bfb7', 'Reviewed Golden fixture changed');
-  assert.equal(report.results.length, 120);
-  assert.equal(new Set(report.results.map(r => r.id)).size, 120);
-  const ranks = { 'gpu-gaming-x-trio5080': 4, 'p2-case-matx': 2 };
-  const precision = { 'p2-case-matx': [0.6, 0.7], 'p2-case-itx': [0.6, 0.8], 'p2-board-b850-wifi': [1, 0.9] };
-  for (const r of report.results) {
-    assert.equal(r.status, 'HIT', `Golden failure: ${r.id}`);
-    assert(Number.isInteger(r.rank) && r.rank > 0 && r.rank <= (ranks[r.id] ?? 1), `Golden rank regression: ${r.id}`);
-    if (r.acceptable != null) {
-      const [p5, p10] = precision[r.id] ?? [1, 1];
-      assert(r.precision_at_5 >= p5 && r.precision_at_10 >= p10, `Golden precision regression: ${r.id}`);
-    }
-  }
+  assert.deepEqual(qualityFailures(report), [], 'UX release gate failed');
 }
 export async function searchGate(db) {
   const plans = await verifyPlans(db);
   assert(plans.length > 0 && plans.every(r => r.index_check), 'Query plan gate failed');
   const catalog = await loadQualityCatalog(db);
-  const { fixture, hash } = await loadSearchFixture();
-  const report = await benchmarkSearch(db, catalog, fixture, { fixtureHash: hash });
+  const { fixture, hash } = await loadUXFixture();
+  const snapshot=await loadSnapshot();
+  assert.equal(snapshot.commit,catalog.metadata.last_sync?.source_commit,'Evaluation snapshot differs');
+  assert((await verifySourceCatalog(db,catalog,snapshot)).pass,'Source catalog integrity failed');
+  const report = await evaluateUX(db, catalog, fixture, { fixtureHash: hash,source:sourceCatalog(snapshot,catalog) });
   assertGolden(report);
-  return { golden: '120/120 pass', plans: plans.length };
+  return { golden: report.by_intent, plans: plans.length };
 }
 
 export async function releaseIdentity(config, epoch) {

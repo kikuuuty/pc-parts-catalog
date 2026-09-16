@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { database } from '../test-support/database.js';
-import { searchBefore } from '../test-support/search-read-before.js';
 import { searchQuery } from '../src/queries.js';
 import { normalize } from '../src/normalize.js';
 import { syncSnapshot } from '../src/sync.js';
@@ -46,7 +45,7 @@ async function setup(t) {
   return db;
 }
 
-test('frozen SQL oracle: complete candidate/score sets, NULLs, duplicate sources, family and fallback remain identical', async t => {
+test('public and debug retrieval preserve candidate sets, NULLs, duplicate sources and fallback', async t => {
   const db = await setup(t);
   const cases = [...broadQueries, ...exactQueries,
     { category: 'memory', keyword: 'ddr5 6000 cl30 32gb', filters: { manufacturer: 'Late vendor' } },
@@ -60,32 +59,36 @@ test('frozen SQL oracle: complete candidate/score sets, NULLs, duplicate sources
     { category: 'cpu_cooler', keyword: '360mm aio', facets: { socket: 'AM5' } },
   ];
   for (const item of cases) {
-    const left = searchBefore(item.category, { ...item, debug: true });
+    const left = searchQuery(item.category, { ...item, debug: false });
     const right = searchQuery(item.category, { ...item, debug: true });
     const full = q => db.query(`${searchCTEs(q.sql)}SELECT id,relevance,fallback,tier,spec_score,manufacturer_score,freshness_score,score,match_type FROM scored ORDER BY id`, q.params.slice(0, -1));
     assert.deepEqual((await full(right)).results, (await full(left)).results, JSON.stringify(item));
-    for (const debug of [false, true]) for (const offset of [0, 20, 100]) {
-      const old = searchBefore(item.category, { ...item, limit: 21, debug });
-      const next = searchQuery(item.category, { ...item, limit: 21, debug });
-      assert.deepEqual((await db.query(`${next.sql} OFFSET ?`, [...next.params, offset])).results,
-        (await db.query(`${old.sql} OFFSET ?`, [...old.params, offset])).results, `${item.keyword}: ${debug}/${offset}`);
+    for (const offset of [0, 20, 100]) {
+      const plain = searchQuery(item.category, { ...item, limit: 21, debug:false });
+      const debug = searchQuery(item.category, { ...item, limit: 21, debug:true });
+      const diagnostics=['search_score','search_match','search_fts_relevance','model_score','spec_score','manufacturer_score','freshness_score','search_fallback'];
+      const rows=(await db.query(`${debug.sql} OFFSET ?`, [...debug.params, offset])).results
+        .map(row=>Object.fromEntries(Object.entries(row).filter(([key])=>!diagnostics.includes(key))));
+      assert.deepEqual(rows,(await db.query(`${plain.sql} OFFSET ?`, [...plain.params, offset])).results.map(row=>({...row})), `${item.keyword}: ${offset}`);
     }
   }
 });
 
-test('explicit order and common/spec column collisions retain the original result and 100-bind contract', async t => {
+test('explicit display ordering is deterministic with ID ties and preserves the 100-bind contract', async t => {
   const db = await setup(t);
   for (const [category, keyword, orderBy] of [['cpu', '14900k', 'manufacturer'], ['cpu', 'ryzen 7', 'release_year'],
     ['memory', 'ddr5', 'capacity_gb'], ['gpu', 'rtx5080', 'length_mm']]) {
     const options = { keyword, orderBy, debug: true, limit: 21 };
-    const old = searchBefore(category, options), next = searchQuery(category, options);
-    assert.deepEqual((await db.query(next.sql, next.params)).results, (await db.query(old.sql, old.params)).results);
+    const q = searchQuery(category, options);
+    const rows=(await db.query(q.sql,q.params)).results;
+    const compare=(a,b)=>a[orderBy]===b[orderBy] ? a.id-b.id : a[orderBy]==null ? -1 : b[orderBy]==null ? 1 : a[orderBy]<b[orderBy] ? -1 : 1;
+    assert.deepEqual(rows,[...rows].sort(compare));
   }
   const values = Array(20).fill('Example');
   const options = { keyword: 'ddr5 6000 cl30 32gb', filters: { manufacturer: values, series: values, variant: values, ecc: values, registered: values.slice(0, 16) } };
-  const old = searchBefore('memory', options), next = searchQuery('memory', options);
+   const next = searchQuery('memory', options);
   assert.equal(next.params.length, 100);
-  assert.deepEqual((await db.query(next.sql, next.params)).results, (await db.query(old.sql, old.params)).results);
+  assert.equal((await db.query(next.sql, next.params)).results.length,0);
   assert.throws(() => searchQuery('memory', { ...options, filters: { ...options.filters, registered: values.slice(0, 17) } }), /100 bound/);
 });
 
@@ -95,7 +98,7 @@ test('broad plans use FTS and typed indexes, PK probes, and stream public rankin
     const q = searchQuery(item.category, item);
     const plan = (await db.query(`EXPLAIN QUERY PLAN ${q.sql}`, q.params)).results.map(r => r.detail);
     assert(!plan.some(d => /^SCAN (?:p|s)(?:$| USING)/.test(d)), `${item.keyword}: ${plan.join('; ')}`);
-    assert(plan.some(d => /product_fts VIRTUAL TABLE INDEX/.test(d)));
+    assert(plan.some(d => d.includes(`${item.category}_fts VIRTUAL TABLE INDEX`)));
     assert(!plan.some(d => /MATERIALIZE (?:ranked|strict_fts)/.test(d)));
     assert(!q.sql.includes('scored r CROSS JOIN products'));
   }

@@ -2,9 +2,10 @@ import { categories, models } from './model.js';
 import { searchQuery } from './queries.js';
 import { searchCachePolicy, searchCacheKey, readSearchCache, writeSearchCache } from './search-cache.js';
 import { protectSearch, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
+import { loadProductDetail, productDetailCache } from './product-detail.js';
+import { searchWindow } from './pagination.js';
 
 const MAX_BODY = 16 * 1024;
-const MAX_WINDOW = 1000;
 const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'] };
 const fields = ['category', 'keyword', 'filters', 'ranges', 'facets', 'identifier', 'orderBy', 'limit', 'offset', 'include'];
 const productFields = ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
@@ -39,9 +40,10 @@ function validate(input) {
   if (!categories.includes(input.category)) invalid('category is required and must be a supported category');
   for (const key of ['keyword', 'orderBy']) if (input[key] !== undefined && !shortText(input[key])) invalid(`${key} must be a nonempty string of at most 200 characters`);
   const { limit = 20, offset = 0, filters = {}, ranges = {}, facets = {}, include = [] } = input;
+  const maxWindow = searchWindow(input);
   if (!Array.isArray(include) || include.length > 2 || new Set(include).size !== include.length || include.some(v => !['identifiers', 'facets'].includes(v))) invalid('include accepts identifiers and facets');
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) invalid('limit must be an integer from 1 to 50');
-  if (!Number.isInteger(offset) || offset < 0 || offset + limit > MAX_WINDOW) invalid('offset must be nonnegative and offset + limit must not exceed 1000');
+  if (!Number.isInteger(offset) || offset < 0 || offset + limit > maxWindow) invalid(`offset must be nonnegative and offset + limit must not exceed ${maxWindow}`);
   const values = selections(filters, 8) + selections(facets, 4);
   if (!object(ranges) || Object.keys(ranges).length > 8) invalid('ranges must be an object with at most 8 fields');
   for (const range of Object.values(ranges)) {
@@ -61,7 +63,7 @@ function validate(input) {
     invalid('Invalid search conditions; check keyword tokens, filter fields, types, ranges and orderBy');
   }
   if (query.params.length >= 100) invalid('Search conditions exceed parameter limit');
-  return { category: input.category, limit, offset, include, query: { sql: `${query.sql} OFFSET ?`, params: [...query.params, offset] } };
+  return { category: input.category, limit, offset, maxWindow, include, query: { sql: `${query.sql} OFFSET ?`, params: [...query.params, offset] } };
 }
 
 async function jsonInput(request) {
@@ -157,9 +159,10 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
       try {
         if (request.url.length > 4096) invalid('URL is too long');
         const url = new URL(request.url);
-        const methods = Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
+        const detailMatch = /^\/v1\/products\/([1-9]\d*)$/.exec(url.pathname);
+        const methods = detailMatch ? ['GET'] : Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
         if (!methods) throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found');
-        event.route = url.pathname;
+        event.route = detailMatch ? '/v1/products/:id' : url.pathname;
         headers.set('Allow', [...methods, 'OPTIONS'].join(', '));
         if (request.method === 'OPTIONS') {
           const method = request.headers.get('access-control-request-method');
@@ -172,7 +175,32 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         } else {
           if (!methods.includes(request.method)) throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
           if (url.pathname !== '/v1/search' && url.search) invalid('This endpoint accepts no query parameters');
-          if (url.pathname === '/v1/health') {
+          if (detailMatch) {
+            const id = Number(detailMatch[1]);
+            if (!Number.isSafeInteger(id)) invalid('Invalid product ID');
+            const policy = productDetailCache(url, id, env);
+            const cache = injectedCache ?? globalThis.caches?.default;
+            const key = cache && policy?.key;
+            if (key) {
+              event.cache_status = 'MISS';
+              headers.set('X-Cache-TTL', String(policy.ttl));
+              try {
+                const hit = await readSearchCache(cache, key, policy.ttl, now());
+                if (hit) { cachedBody = hit.body; event.cache_status = 'HIT'; headers.set('Age', String(hit.age)); }
+              } catch { event.cache_status = 'BYPASS'; event.cache_error = 'match'; }
+            }
+            if (cachedBody === undefined) {
+              const release = await protectSearch(env, event, {}, 'GET', key, refillGuard);
+              try {
+                payload = await loadProductDetail(execute, id);
+                if (!payload) throw new HttpError(404, 'PRODUCT_NOT_FOUND', 'Product not found');
+                if (key) {
+                  try { await writeSearchCache(cache, key, JSON.stringify(payload), policy.ttl, now()); }
+                  catch { event.cache_status = 'BYPASS'; event.cache_error = 'put'; }
+                }
+              } finally { release(); }
+            }
+          } else if (url.pathname === '/v1/health') {
             await protectHealth(env, event);
             await execute('SELECT 1 AS ok');
             payload = { ok: true, database: 'available' };
@@ -181,7 +209,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
             headers.set('Cache-Control', 'public, max-age=60, s-maxage=60');
           } else {
             const input = await searchInput(request, url);
-            const { category, limit, offset, include, query } = validate(input);
+            const { category, limit, offset, maxWindow, include, query } = validate(input);
             Object.assign(event, { category, limit, offset });
             const policy = request.method === 'GET' ? searchCachePolicy(env, input) : null;
             const cache = injectedCache ?? globalThis.caches?.default;
@@ -203,7 +231,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
               try {
                 const rows = await execute(query.sql, query.params);
                 const hasMore = rows.length > limit;
-                const nextOffset = hasMore && offset + 2 * limit <= MAX_WINDOW ? offset + limit : null;
+                const nextOffset = hasMore && offset + 2 * limit <= maxWindow ? offset + limit : null;
                 // Opt-in POST expansion keeps existing GET/cache and default POST
                 // payloads exact. One bounded indexed query covers only this page.
                 const page = rows.slice(0, limit);
@@ -228,7 +256,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
                     ...extras.get(row.id),
                   })),
                   meta: { limit, offset, returned: Math.min(rows.length, limit), has_more: hasMore, next_offset: nextOffset,
-                    window_limit: MAX_WINDOW, window_exhausted: hasMore && nextOffset === null, source },
+                    window_limit: maxWindow, window_exhausted: hasMore && nextOffset === null, source },
                 };
                 if (key) {
                   try {

@@ -29,7 +29,7 @@ CPU family限定の弱いfreshnessを追加した。候補取得の上限やNULL
 
 ## Field-aware ranking / exact boost
 
-`product_fts`は従来の`text`に加え、検索専用の`name`、`manufacturer`、`series`、`variant`、`family`列を持つ。
+各`<category>_fts`は`text`、`name`、`manufacturer`、`series`、`variant`、`family`列を持つ。
 `family`には既存CPU family/generationとGPU chipset/chip_seriesを投影する。
 `text`は従来の検索文書（上流identifierを含む）と取込契約を維持する。
 
@@ -54,7 +54,7 @@ Phase 1の一致tierは以下。Phase 2では名称全体と名称phraseの間�
 `ryzen 7`では製品名のphrase/token一致がidentifierだけの`7`より強い。
 ただし、これは検索上の優先度であり、名前の方が常に正しいというデータ検証ではない。
 
-同じtier内では`bm25(product_fts, ...)`のcolumn weightを利用する。
+同じtier内では`bm25(<category>_fts, ...)`のcolumn weightを利用する。
 nameを最も重く、series/family、variant、manufacturer、legacy textを順に低くする。
 FTS5の負のbm25値を正のrelevanceに直し、1未満の範囲へ圧縮してtierを逆転させない。
 同点は`product ID ASC`。local identifierだけの一致は通常FTS tierで、信頼できる完全一致の場合は上記boostを得る。
@@ -139,5 +139,4 @@ legacy textのINSERT後にフィールドUPDATEが加わるため、変更製品
 typo訂正、fuzzy/semantic検索、一般の同義語、任意の省略語、メーカーやSKUの品質修正は含まない。
 元のMPNやvariantの誤りは残り、低順位の候補やBM25に影響する場合がある。
 広い検索は検索語の一致を評価するため、最新世代・人気・容量・OC優先などの意図は推測しない。
-Phase 1の実測は[Phase 1測定結果](search-quality-phase1.md)、現在の120件評価は
-[Phase 2測定結果](search-quality-phase2.md)を参照。
+正式な評価は[UX評価契約](search-evaluation.md)、実測は[ローカル検証](category-search-validation.md)を参照。

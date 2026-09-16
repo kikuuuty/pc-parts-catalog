@@ -1,6 +1,6 @@
 // Cache policy only. Call after the HTTP and searchQuery validation, never before.
 // Bump this namespace for response/search implementation changes, independently of catalog sync.
-export const CACHE_SCHEMA_GENERATION = 'v1';
+export const CACHE_SCHEMA_GENERATION = 'v2';
 const STORED_AT = 'X-Catalog-Cached-At';
 
 export function searchCachePolicy(env, input) {
@@ -33,7 +33,9 @@ export async function readSearchCache(cache, key, ttl, now) {
   const storedAt = Number(response.headers.get(STORED_AT));
   const age = now - storedAt;
   if (response.status !== 200 || !response.headers.has(STORED_AT) || !Number.isFinite(age) || age < 0 || age >= ttl * 1000) {
-    await response.body?.cancel();
+    // A cloned/tee'd cache stream can wait for its sibling on cancellation.
+    // Discard asynchronously; expiry must never block the database fallback.
+    void response.body?.cancel().catch(() => {});
     return null;
   }
   return { body: await response.text(), age: Math.floor(age / 1000) };

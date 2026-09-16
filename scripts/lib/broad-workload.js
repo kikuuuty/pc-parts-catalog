@@ -18,7 +18,7 @@ export const offsetQueries = [0, 20, 40, 60, 80, 100].map(offset => ({
   id: `offset:${offset}`, group: 'offset', category: 'memory', keyword: 'ddr5', offset,
 }));
 
-// Original and optimized builders retain these logical CTE names for diagnostics.
+// Logical CTE phase extraction for current-compiler diagnostics.
 export function searchCTEs(sql) {
   const boundary = Math.max(sql.lastIndexOf('SELECT p.id,p.upstream_id'), sql.lastIndexOf('SELECT r._p_id AS id'));
   if (boundary < 0) throw new Error('Search SQL layout changed; review diagnostic extraction');

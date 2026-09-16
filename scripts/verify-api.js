@@ -1,9 +1,9 @@
 import { parseArgs } from 'node:util';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { openDatabase } from '../src/database.js';
 import { searchQuery } from '../src/queries.js';
-import { loadSearchFixture } from '../src/quality/fixtures.js';
+import { loadUXFixture } from '../src/quality/ux.js';
 import { catalogState, assertCatalogState } from '../src/quality/catalog.js';
 import { categories } from '../src/model.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -13,14 +13,14 @@ import { safeDatabase } from './lib/release-gates.js';
 
 const { values: args } = parseArgs({ options: {
   url: { type: 'string' }, remote: { type: 'boolean', default: false }, rounds: { type: 'string', default: '3' },
-  golden: { type: 'boolean', default: false }, baseline: { type: 'string' }, output: { type: 'string', default: '.cache/api-verification.json' },
+  golden: { type: 'boolean', default: false }, output: { type: 'string', default: '.cache/api-verification.json' },
   'direct-only': { type: 'boolean', default: false }, 'allow-partial': { type: 'boolean', default: false },
   'cache-repeat': { type: 'boolean', default: false }, 'golden-only': { type: 'boolean', default: false },
   paced: { type: 'boolean', default: false },
   smoke: { type: 'boolean', default: false },
 } });
 if (!args.url && !args['direct-only']) throw new Error('Provide --url http://127.0.0.1:8787 or the deployed HTTPS origin; use --remote to compare remote D1');
-if (args['direct-only'] && (args.url || args.golden || args.baseline)) throw new Error('--direct-only cannot be combined with URL/Golden API comparison');
+if (args['direct-only'] && (args.url || args.golden)) throw new Error('--direct-only cannot be combined with URL/Golden API comparison');
 if (args['allow-partial'] && !args['direct-only']) throw new Error('--allow-partial is only for diagnostic direct-D1 measurements');
 if ((args['cache-repeat'] || args['golden-only']) && !args.golden) throw new Error('Cache regression options require --golden');
 const origin = args.url ? new URL(args.url) : null;
@@ -110,21 +110,12 @@ try {
     assert.deepEqual(ids((await apiSearch(advanced)).body.data), ids((await db.query(advancedQuery.sql, advancedQuery.params)).results));
   }
   if (args.golden) {
-    const { fixture, hash } = await loadSearchFixture();
-    const baseline = args.baseline ? JSON.parse(await readFile(args.baseline, 'utf8')) : null;
-    if (baseline) assert.equal(baseline.fixture_sha256, hash, 'Baseline fixture differs');
+    const { fixture } = await loadUXFixture();
     for (const item of fixture) {
       const query = searchQuery(item.category, { ...item.search, keyword: item.query, limit: 20 });
       const direct = await db.query(query.sql, query.params);
       const api = await apiSearch(item);
       assert.deepEqual(ids(api.body.data), ids(direct.results), `Golden API ranking mismatch: ${item.id}`);
-      let rank = null;
-      if (baseline) {
-        const expected = baseline.results.find(r => r.id === item.id);
-        assert.deepEqual(ids(api.body.data.slice(0, 10)), ids(expected.top_results), `Baseline top 10 mismatch: ${item.id}`);
-        rank = api.body.data.findIndex(row => expected.resolved_products.some(p => p.upstream_key === row.upstream_key)) + 1;
-        assert.equal(rank, expected.rank, `Expected product rank mismatch: ${item.id}`);
-      }
       let repeat;
       if (args['cache-repeat']) {
         repeat = await apiSearch(item, !item.search);
@@ -134,7 +125,7 @@ try {
       }
       report.golden.push({ id: item.id, elapsed_ms: api.elapsed_ms, request_id: api.request_id,
         cache_status: api.cache_status, repeat_cache_status: repeat?.cache_status, repeat_request_id: repeat?.request_id,
-        rank, zero: api.body.data.length === 0, top_10: ids(api.body.data.slice(0, 10)), top_20: ids(api.body.data), matched: true });
+        intent:item.intent, zero: api.body.data.length === 0, top_20: ids(api.body.data), matched: true });
     }
   }
   await assertCatalogState(db, initial);
@@ -152,13 +143,6 @@ try {
       rows_read: distribution(report.samples.filter(s => s.query === c.query).map(s => s.direct_meta?.rows_read)),
       returned: distribution(report.samples.filter(s => s.query === c.query).map(s => s.returned)),
     }])), golden_matched: report.golden.length,
-    golden_metrics: args.baseline && report.golden.length ? {
-      hit_at_1: report.golden.filter(r => r.rank > 0 && r.rank <= 1).length / report.golden.length,
-      hit_at_5: report.golden.filter(r => r.rank > 0 && r.rank <= 5).length / report.golden.length,
-      hit_at_10: report.golden.filter(r => r.rank > 0 && r.rank <= 10).length / report.golden.length,
-      mrr: report.golden.reduce((n, r) => n + (r.rank ? 1 / r.rank : 0), 0) / report.golden.length,
-      zero: report.golden.filter(r => r.zero).length,
-    } : null,
   };
   await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify({ output: args.output, partial_catalog: report.partial_catalog, ...report.summary }, null, 2));

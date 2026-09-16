@@ -183,6 +183,7 @@ test('migration backfills search only and subsequent ingest refreshes fields ato
   const before = protectedRows();
   db.sqlite.exec(readFileSync(new URL('../migrations/0004_search_relevance.sql',import.meta.url),'utf8'));
   assert.deepEqual(protectedRows(),before);
+  for (const name of ['0005_spec_search_indexes.sql','0006_fts_projection_consistency.sql','0007_all_categories.sql','0008_category_fts.sql']) db.sqlite.exec(readFileSync(new URL(`../migrations/${name}`,import.meta.url),'utf8'));
   assert.equal((await search(db,'cpu','14900k'))[0].search_match,'name-phrase');
   assert.equal((await search(db,'cpu','LOCAL1234'))[0].search_match,'exact-identifier');
   const changed = structuredClone(original);

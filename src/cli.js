@@ -7,12 +7,11 @@ import { openDatabase } from './database.js';
 import { readRemoteConfig } from './remote-config.js';
 import { syncSnapshot } from './sync.js';
 import { searchQuery, verifyPlans } from './queries.js';
-import { createHash } from 'node:crypto';
 import { loadQualityCatalog } from './quality/catalog.js';
 import { auditCompleteness, auditDuplicates } from './quality/audit.js';
-import { benchmarkSearch } from './quality/benchmark.js';
+import { loadUXFixture, evaluateUX, sourceCatalog } from './quality/ux.js';
 import { loadSearchFixture } from './quality/fixtures.js';
-import { formatCompleteness, formatDuplicates, formatBenchmark } from './quality/format.js';
+import { formatCompleteness, formatDuplicates } from './quality/format.js';
 
 const { values: args, positionals } = parseArgs({ allowPositionals: true, options: {
   remote: { type: 'boolean', default: false }, repo: { type: 'string', default: defaultRepo }, ref: { type: 'string', default: 'main' },
@@ -57,14 +56,12 @@ async function main() {
         report = auditDuplicates(catalog, options);
         format = value => formatDuplicates(value, { verbose: args.verbose, limit: positiveInteger(args.limit, 10) });
       } else {
-        const input = await loadSearchFixture(args.fixture);
-        const implementation = await Promise.all(['queries.js','search-intent.js'].map(file => readFile(new URL(file, import.meta.url),'utf8')));
-        report = await benchmarkSearch(db, catalog, input.fixture, {
-          category: args.category, suite:args.suite, queryClass:args.class,
-          fixtureHash: input.hash,
-          searchImplementationHash: createHash('sha256').update(JSON.stringify(implementation)).digest('hex'),
-        });
-        format = value => formatBenchmark(value, { verbose: args.verbose, summaryOnly:args['summary-only'] });
+        const input = args.fixture ? await loadSearchFixture(args.fixture) : await loadUXFixture();
+        const fixture=input.fixture.filter(r=>(!args.category||r.category===args.category)&&(!args.suite||r.suite===args.suite)&&(!args.class||r.class===args.class));
+        const snapshot=await loadSnapshot(args.repo);
+        if(snapshot.commit!==catalog.metadata.last_sync?.source_commit) throw new Error('Evaluation source must match catalog snapshot');
+        report = await evaluateUX(db,catalog,fixture,{fixtureHash:input.hash,source:sourceCatalog(snapshot,catalog)});
+        format = value => JSON.stringify(args.verbose ? value : value.by_intent,null,2);
       }
       if (args.output) await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
       if (args.json) print(report);

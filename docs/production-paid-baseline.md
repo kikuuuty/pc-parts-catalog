@@ -122,7 +122,7 @@ read差は+179行（約0.068%）。query plansはlocal/remoteとも28/28成功�
 
 ### Local Phase 2との厳密順位差
 
-`compare-search-runs.js` は以下5件のtop 10差を検出し、**非0終了した**。
+当時の比較では以下5件のtop 10差を検出した。比較用scriptは廃止済みで、現在のrelease判定は[UX評価](search-evaluation.md)に従う。
 比較ルールやexpectedを変更して成功扱いにする処理は加えていない。
 
 |Query|差の例|
@@ -164,7 +164,7 @@ c2002437-b299-4c61-8e70-6df8b8fcdcfc
 ```
 
 ```sh
-npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --baseline .cache/search-remote-phase2.json --output .cache/api-production.json
+npm run verify:api -- --url https://pc-parts-catalog.kikuuuty.workers.dev --remote --golden --output .cache/api-production.json
 ```
 
 health/categories、主要11検索×3回、高度POST、120 Golden Queryに成功。

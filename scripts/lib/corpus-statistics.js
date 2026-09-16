@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import { models } from '../../src/model.js';
-import { categoryIndexes, experimentQuery } from './corpus-experiment.js';
+import { categories, ftsName } from '../../src/model.js';
+import { searchQuery } from '../../src/queries.js';
 
 // node:sqlite only, outside production requests. Unicode61 itself tokenizes the
 // original and expanded MATCH terms; JS tokenization is not used as a DF proxy.
-export function corpusStatistics(sqlite, corpus, fixture) {
-  const indexes = corpus==='category' ? Object.values(categoryIndexes) : ['product_fts','extended_product_fts'];
-  sqlite.exec("CREATE VIRTUAL TABLE temp.experiment_tokens USING fts5(text,tokenize='unicode61'); CREATE VIRTUAL TABLE temp.experiment_token_vocab USING fts5vocab(temp,experiment_tokens,'row')");
+export function corpusStatistics(sqlite, fixture) {
+  const indexes = categories.map(ftsName);
+  sqlite.exec("CREATE VIRTUAL TABLE temp.diagnostic_tokens USING fts5(text,tokenize='unicode61'); CREATE VIRTUAL TABLE temp.diagnostic_token_vocab USING fts5vocab(temp,diagnostic_tokens,'row')");
   const statistics={};
   for (const index of indexes) {
     sqlite.exec(`CREATE VIRTUAL TABLE temp.${index}_vocab USING fts5vocab(main,${index},'row'); CREATE VIRTUAL TABLE temp.${index}_instances USING fts5vocab(main,${index},'instance')`);
@@ -16,14 +16,15 @@ export function corpusStatistics(sqlite, corpus, fixture) {
   }
   const queries=[];
   for (const item of fixture) {
-    const query=experimentQuery(corpus)(item.category,{...item.search,keyword:item.query});
+    if (!item.query) continue;
+    const query=searchQuery(item.category,{...item.search,keyword:item.query});
     const terms=JSON.parse(query.params.find(p => typeof p==='string' && p.startsWith('{"strict":')));
     const expressions=[terms.strict.prefix,terms.fallback?.prefix,terms.literalPrefix,terms.identityResidual].filter(Boolean);
     const quoted=expressions.flatMap(e => [...e.matchAll(/"([^"]+)"/g)].map(m => m[1]));
-    sqlite.exec('DELETE FROM temp.experiment_tokens');
-    sqlite.prepare('INSERT INTO temp.experiment_tokens(text) VALUES(?)').run([item.query,...quoted].join(' '));
-    const tokens=sqlite.prepare('SELECT term FROM temp.experiment_token_vocab ORDER BY term').all().map(r => r.term);
-    const index=corpus==='category' ? categoryIndexes[item.category] : models[item.category].searchIndex;
+    sqlite.exec('DELETE FROM temp.diagnostic_tokens');
+    sqlite.prepare('INSERT INTO temp.diagnostic_tokens(text) VALUES(?)').run([item.query,...quoted].join(' '));
+    const tokens=sqlite.prepare('SELECT term FROM temp.diagnostic_token_vocab ORDER BY term').all().map(r => r.term);
+    const index=ftsName(item.category);
     const stats=statistics[index];
     for (const token of tokens) if (!Object.hasOwn(stats.terms,token)) {
       const row=sqlite.prepare(`SELECT doc,cnt FROM temp.${index}_vocab WHERE term=?`).get(token);
@@ -37,9 +38,9 @@ export function corpusStatistics(sqlite, corpus, fixture) {
   return {method:'FTS5 unicode61 + fts5vocab(row/instance); document length sums all six columns, prefix DF unions distinct docs; IDF is explanatory, not a cross-corpus score comparison',statistics,queries};
 }
 
-export function storageStatistics(sqlite, corpus) {
+export function storageStatistics(sqlite) {
   const schema=sqlite.prepare('SELECT type,name,tbl_name,sql FROM sqlite_schema ORDER BY name').all();
-  const indexes=corpus==='category' ? Object.values(categoryIndexes) : ['product_fts','extended_product_fts'];
+  const indexes=categories.map(ftsName);
   const shadow = name => indexes.some(i => name.startsWith(i+'_'));
   const localShadow = name => name.startsWith('local_identifier_fts_');
   const pageSize=sqlite.prepare('PRAGMA page_size').get().page_size, pageCount=sqlite.prepare('PRAGMA page_count').get().page_count;

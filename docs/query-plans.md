@@ -1,108 +1,26 @@
-# 検索SQLとINDEXの検証
+# Query-plan verification
 
-## 再現手順
+`npm run verify:plans` runs 45 representative search requests through the shared
+compiler, then records EXPLAIN QUERY PLAN, returned count and D1 metadata.
+The categories, typed field definitions and declared indexes are owned by the
+registry; tuning migrations add the measured compound indexes.
 
-```sh
-npm ci
-npm run upstream:fetch -- --ref eec0df175504ebd15f0f3e3a8249a18a22f00940
-npm run db:migrate
-npm run sync
-npm run verify:plans
-```
+- Category FTS supplies lexical candidates. `SCAN <category>_fts VIRTUAL TABLE
+  INDEX` is an FTS access path, not a catalog full scan.
+- Candidate product/spec joins use their PKs. Identifier exact lookup uses
+  `(value_key,type,product_id)` indexes on upstream and local tables.
+- Facet-only selection uses the reverse `(attribute,value,product_id)` index;
+  selective typed candidates probe the product_id-leading facet PK.
+- Typed range/order queries use reviewed compound indexes. A residual range is
+  not falsely described as a second independent index seek.
+- Candidate GROUP BY / display ORDER BY may need temp B-trees. The UX report
+  explicitly exposes them. Unexpected full scans of products/spec tables fail.
 
-検証はローカルの**実際のD1 binding**で実行する。一般のSQLiteだけをD1の代用として扱わない。
-`src/queries.js` の `representativeQueries` に条件と期待INDEXを定義している。
-CLIの検索と同じ `searchQuery()` がparameterized SQLを生成し、
-`EXPLAIN QUERY PLAN` と実際のSELECTを両方実行する。
-期待したINDEXが使われない場合は終了コード1。`INDEXED BY` による強制はしていない。
+Product Detail separately tests 4 query plans for each of 30 categories: product
+PK, typed spec PK, identifier product_id indexes, and facet product_id PK. Its
+plans reject full scans of product/spec/identifier/facet tables.
 
-`.cache/query-plans.json` にSQL全文、params、EXPLAIN、戻り件数、D1 metaを記録する。
-`--remote` で設定済みのリモートD1でも同じ確認ができる。
-メタデータの変化でプランが変わった場合は、INDEX名のチェックを単に緩めず実クエリを確認する。
-
-## 2026-09-12の実測
-
-上記commitの29,599製品、Node 24.16.0、Wrangler 4.131.1、Windows、migration 0001～0003。
-最終計測の `size_after` は **130,990,080 bytes**（約131MB / 125MiB）。
-以下のrows_readはLIMIT 20でのローカルD1観測値で、リモートの課金量やレイテンシの保証ではない。
-
-|条件|主なEXPLAIN結果|戻り件数|rows_read|
-|---|---|---:|---:|
-|CPU / Intel / Core i7|`cpu_family_cores (manufacturer=? AND family=?)`|20|40|
-|CPU / AMD / Ryzen 7 / cores >=8|`cpu_family_cores (manufacturer=? AND family=? AND core_count>?)`|20|40|
-|GPU / NVIDIA / VRAM >=16 / length <=320|`gpu_vendor_vram (chip_vendor=? AND vram_gb>?)`|20|58|
-|RAM / DDR5 / capacity >=32 / speed >=6000|`memory_type_speed (ram_type=? AND speed>?)`|20|46|
-|PSU / ATX / wattage >=850|`psu_form_wattage (form_factor=? AND wattage>?)`|20|40|
-|Case / GPU clearance >=350|`case_gpu_clearance (max_gpu_length_mm>?)`|20|40|
-|MPN BX80768285K|`upstream_identifier_exact` と `local_identifier_exact` の `(value_key=? AND type=?)`|1|6|
-|keyword RTX 5080 / NVIDIA / length 250～320|FTS5 `VIRTUAL TABLE INDEX …:M1` → product PK → GPU PK|20|222|
-|Storage / SSD / capacity >=1000 / PCIe >=4|`storage_type_capacity (storage_type=? AND capacity_gb>?)`|20|70|
-|Fan / 120mm / airflow >=60 / noise <=25|`fan_size_airflow (size_mm=? AND airflow_max_cfm>?)`|20|71|
-|Cooler / air / height <=160 / AM5|`cooler_type_height (water_cooled=? AND height_mm<?)` + `facets_value (attribute=? AND value=? AND product_id=?)`|20|170|
-|Cooler / AM5のみ|`facets_value (attribute=? AND value=?)` → product/spec PK|20|1,810|
-
-FTSのEXPLAINに `SCAN ... VIRTUAL TABLE INDEX` と出るのはFTSの検索演算子を使っているためであり、
-products全表の文字列走査という意味ではない。identifier viewの `SCAN identifiers` も、
-先に完全一致INDEXで得たUNION結果に対する処理である。
-
-## 実測から行った調整
-
-初期案ではGPU INDEXが `(chip_vendor, vram_gb, length_mm, product_id)`、
-RAM INDEXが `(ram_type, speed, capacity_gb, product_id)` だった。
-`ORDER BY vram_gb, product_id` / `ORDER BY speed, product_id` の最後のキーに対して、
-`USE TEMP B-TREE FOR LAST TERM OF ORDER BY` が発生した。
-
-残余条件よりもORDER BYのproduct_idを先にした `0003_query_plan_tuning.sql` により:
-
-- GPU: rows_read **845 → 58**。
-- RAM: rows_read **2,315 → 46**。
-- クーラーは型付きフィルタに続いてfacetをEXISTSで照合するようにし、**6,492 → 170**。
-
-INDEX数は増やしていない。変更後は `PRAGMA optimize` で統計を更新した。
-キーワード検索のUNION、一部の複数選択やfacet起点検索のsortは許容している。
-
-## SQLiteの制約を踏まえた運用
-
-- GPUはVRAM範囲をINDEXで絞り、lengthは同INDEX中の残余条件。2つのレンジを同時にseekしているわけではない。
-- RAMもspeed範囲をINDEXで絞り、capacityは残余条件。
-- カテゴリ固有テーブルはそれ自体がカテゴリを限定する。category列を全スペックINDEXに重複させない。
-- productsはactive部分INDEXの `(category, manufacturer, series, id)` と `(category, series, id)`。
-  `(category)` / `(category, manufacturer)` の独立INDEXは左端prefixで代用できるので追加しない。
-- その他のTDP、noise、clock等も型付き列で比較可能だが、すべてをINDEX化しない。
-  既存のカテゴリ・選択フィルタで絞った候補に対して評価する。
-- CPU family不明、PCIe世代不明等はNULL。未知を別製品へ誤分類しない。
-- SQL例は `examples/queries.sql`。任意のSQLの先頭に `EXPLAIN QUERY PLAN` を付けてWranglerで検証できる。
-- 将来クエリや分布が変わったら、実際のWHERE/ORDER BY、rows_read、更新コストを確認して新migrationで調整する。
-
-## データ品質の確認
-
-inspection reportの `fields_present` をカテゴリ件数で割ると検索列の情報充足率を確認できる。
-今回のケース3,778件のうち、GPU最大長は3,607件、CPUクーラー最大高は1,291件、PSU最大長は385件。
-NULLを0として検索すると「PSU長上限0mm」等の誤った互換性判断になるため、NULLのまま保持する。
-CPUの既知family分類は452/789件。Xeon、Threadripper等の未対応分類はraw/series/nameを保持してfamilyはNULL。
-互換性に使う際は上流の情報充足率と原データも確認する。
-
-## Phase 1検索改善後の検証
-
-`0004_search_relevance.sql`適用後は従来12件＋exact/compact/short-token/fallback/keyword identifierの5件、
-**17件すべて成功**。keyword経路はFTS候補IDを起点にproducts/specを主キーで引き、
-全products/spec走査があれば`verify:plans`を失敗させる。
-既存のkeyword＋GPU filtersはrelevance評価のためrows_readが222 → 650、
-他のkeywordなし代表条件は従来のINDEXと読取量を維持した。
-FTS列の拡張によりDBサイズは138,330,112 bytesになった。
-
-計画・時間・読取量・migrationの比較は[Phase 1測定結果](search-quality-phase1.md)、
-CROSS JOINによる候補起点制御と100 bindの維持方法は[検索仕様](search-relevance.md)を参照。
-
-上流の出典とODC-By 1.0通知は [NOTICE.md](../NOTICE.md) を参照。
-
-## Phase 2
-
-`0005_spec_search_indexes.sql`でmemory容量/speed、motherboard chipset、cooler fan径の4 INDEXを追加。
-`verify:plans`は28件、拡張fixture＋edgeの追加測定は125件すべてでproducts/spec全走査なし。
-spec-onlyの補助経路は既存/追加INDEXの左端から取得し、scope適用後に256件へ制限する。
-複数spec＋メーカー語の照合ではFTS ID集合を一度計算して利用する。
-
-既存40件のrows_readは15,441→15,483。拡張120件は186,124→262,763。
-費用・時間・候補上限のtrade-offは[Phase 2測定結果](search-quality-phase2.md)と
-[検索仕様](search-phase2.md)を参照。
+`npm run verify:search:local` measures all intent cases, the representative plans
+and Detail plans on a fixed 48,134-product local D1 snapshot. See
+[validation results](category-search-validation.md) for costs and outcomes.
+Synthetic node:sqlite tests check correctness but are not D1 read-cost estimates.

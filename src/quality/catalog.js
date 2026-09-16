@@ -45,13 +45,15 @@ export async function loadQualityCatalog(db) {
     if (!rows.length) break;
     for (const row of rows) {
       if (!categories.includes(row.category)) throw new Error(`Category not present in models: ${row.category}`);
-      const p = { ...row, spec: null, identifiers: [] };
+      const p = { ...row, spec: null, identifiers: [], facets: [] };
       products.push(p);
       byId.set(p.id, p);
     }
     // Indexed product_id intervals avoid OFFSET scans and the 100-bind D1 ceiling.
     const ids = (await db.query('SELECT * FROM identifiers WHERE product_id>? AND product_id<=? ORDER BY product_id,type,value,region,origin,origin_field', [cursor, rows.at(-1).id])).results;
     for (const i of ids) byId.get(i.product_id)?.identifiers.push(i);
+    const facets = (await db.query('SELECT * FROM product_facets WHERE product_id>? AND product_id<=? ORDER BY product_id,attribute,value', [cursor, rows.at(-1).id])).results;
+    for (const f of facets) byId.get(f.product_id)?.facets.push(f);
     cursor = rows.at(-1).id;
   }
   for (const model of Object.values(models)) {
