@@ -541,6 +541,21 @@ npm run benchmark:search -- --fixture test/fixtures/search-benchmark.json
 許容集合を明示した44件のPrecision@5/10も出力します。
 評価定義・DB根拠・集合selectorの仕様は[Phase 2評価契約](docs/search-evaluation-phase2.md)を参照してください。
 
+この120件全体を固定のlegacy regression資産として維持し、新21カテゴリは独立した
+`test/fixtures/search-extended.json` **102件**で評価できます。
+[FTS corpus A/B実験レポート](docs/fts-corpus-experiment.md)には、BM25通常/無効/中心の診断、
+category・class別品質、rank回帰、top-K overlap、D1コスト、DBサイズと採否判断をまとめています。
+今回の実測ではproductionは2-FTS維持を推奨します。
+
+```sh
+npm run benchmark:search -- --fixture test/fixtures/search-extended.json --suite extended
+npm run experiment:fts
+npm run experiment:fts:report
+```
+
+実験commandは既存の固定snapshot検証DBを `.cache` に複製してローカルD1で比較します。
+必要なsource-locationと段階実行・レポートファイルは上記実験レポートを参照してください。
+
 ```sh
 npm run benchmark:search -- --suite regression
 npm run benchmark:search -- --suite development
@@ -564,6 +579,8 @@ WHERE/FTS/ORDER BYは変更せず、期待製品が見つかるか検索結果�
 |Hit@1 / Hit@5 / Hit@10|最初の許容製品が上位K件以内にある検索の割合|
 |MRR|最初の許容製品の順位の逆数の平均。10位や100位で打ち切らない|
 |zero_result_count|実際に実行した検索が0件だった数|
+|zero_result_rate|採点対象queryに占める0件検索の割合|
+|recall_at_10|複数acceptableを明示したqueryの、top10回収数 / acceptable全数のmacro平均|
 |query_count|指定範囲のfixtureケース数|
 |scored_query_count|不正なfixtureを除いた採点母数。MISSING_PRODUCTは含み、0点とする|
 |failed_query_count|上位10件に入らなかったケース数。不正fixtureも別分類で含む|
@@ -577,7 +594,7 @@ WHERE/FTS/ORDER BYは変更せず、期待製品が見つかるか検索結果�
 - `RANKING_FAILURE`: 一致するが11位以下。
 - `EXPECTED_DATA_INVALID`: 形式不正、重複したcase ID、不明な検索条件、単一selectorで複数製品に一致するなど。
 
-デフォルトは総合スコアと失敗ケースのquery・expected・rank・上位10件を表示します。
+デフォルトは総合スコアと失敗ケースのquery・expected・rank・上位20件を表示します。
 `--verbose` とJSONでは成功ケースも確認できます。`retrieved_count` は診断で実際に取得した件数で、
 検索総ヒット数ではありません。`search_exhausted` とページ数も記録します。
 DB/APIエラーは0件検索に変換せずコマンドを失敗させます。

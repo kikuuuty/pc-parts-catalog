@@ -1,0 +1,3907 @@
+[
+  {
+    "id": "ext-keyboard-01",
+    "category": "keyboard",
+    "query": "Keychron Q1 QMK V2 Knob Mini Mechanical Keyboard",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/4d239c02-3bf1-45d6-9d94-fa3c096eb87a"
+    }
+  },
+  {
+    "id": "ext-keyboard-02",
+    "category": "keyboard",
+    "query": "Keychron Q1 QMK V2 Knob",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/4d239c02-3bf1-45d6-9d94-fa3c096eb87a"
+    }
+  },
+  {
+    "id": "ext-keyboard-03",
+    "category": "keyboard",
+    "query": "K380s",
+    "class": "compact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/4c7a1dfc-7954-47d7-aada-263bac218b41"
+    }
+  },
+  {
+    "id": "ext-keyboard-04",
+    "category": "keyboard",
+    "query": "Pebble Keys 2 K380s Tonal Rose",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/451a2df2-55a9-43ff-b07e-96811bedfd11"
+    }
+  },
+  {
+    "id": "ext-keyboard-05",
+    "category": "keyboard",
+    "query": "8BitDo Retro C64",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/fcaee215-422f-4107-a3ea-1d9122950c88"
+    }
+  },
+  {
+    "id": "ext-keyboard-06",
+    "category": "keyboard",
+    "query": "8BitDo Retro Fami",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/ddafe6ad-cea8-4a1b-b61d-0ad0f0f7f51c"
+    }
+  },
+  {
+    "id": "ext-keyboard-07",
+    "category": "keyboard",
+    "query": "Q1-M1",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/4d239c02-3bf1-45d6-9d94-fa3c096eb87a"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "Q1-M1"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-keyboard-08",
+    "category": "keyboard",
+    "query": "920-011775",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Keyboard/4c7a1dfc-7954-47d7-aada-263bac218b41"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "920-011775"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-keyboard-09",
+    "category": "keyboard",
+    "query": "keychron q1",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/030c689a-fcd6-495b-afb2-0b666a461d06"
+        },
+        {
+          "upstream_key": "Keyboard/1e7ea52d-3cff-4dbd-a429-4caeb7191c98"
+        },
+        {
+          "upstream_key": "Keyboard/1ee3b6f1-d17b-45d8-be8d-62a88753f9cd"
+        },
+        {
+          "upstream_key": "Keyboard/2b29e0b4-61e9-48fe-b1c5-59373fd4374f"
+        },
+        {
+          "upstream_key": "Keyboard/3af1de18-8601-4881-9c03-3a61d32bd444"
+        },
+        {
+          "upstream_key": "Keyboard/3c371606-d146-44ef-b5ae-628a5ccfdac3"
+        },
+        {
+          "upstream_key": "Keyboard/3f28e10b-f532-4504-8590-e2b4a26f801a"
+        },
+        {
+          "upstream_key": "Keyboard/401d134f-b6d4-4698-bf1d-c2ad93823297"
+        },
+        {
+          "upstream_key": "Keyboard/4d239c02-3bf1-45d6-9d94-fa3c096eb87a"
+        },
+        {
+          "upstream_key": "Keyboard/596eb29b-032f-44e7-8c55-44c1da11c754"
+        },
+        {
+          "upstream_key": "Keyboard/5a6043dd-7a6d-44d1-8814-f0ed855a2f37"
+        },
+        {
+          "upstream_key": "Keyboard/635ff402-cb3b-459d-bd24-1648a9a1f589"
+        },
+        {
+          "upstream_key": "Keyboard/66deb0b7-21df-4835-9ea6-736f62ddd7c3"
+        },
+        {
+          "upstream_key": "Keyboard/703828ab-77c7-4eaf-9454-01f2bd9a0315"
+        },
+        {
+          "upstream_key": "Keyboard/7691a0b7-1fd5-4759-8f7a-172de95f772a"
+        },
+        {
+          "upstream_key": "Keyboard/7784d270-0f32-4bf9-a0b5-e6b8d8711bae"
+        },
+        {
+          "upstream_key": "Keyboard/851a10b9-aaf7-4079-91d0-8d26edf77523"
+        },
+        {
+          "upstream_key": "Keyboard/9a5a0d0e-dc44-4e78-844c-2c032b919b63"
+        },
+        {
+          "upstream_key": "Keyboard/9bf96498-5bcd-43e1-bc48-ebbb302e5b3a"
+        },
+        {
+          "upstream_key": "Keyboard/b2fbf415-5df2-4e3a-a2f8-5ed12a92400b"
+        },
+        {
+          "upstream_key": "Keyboard/bf683249-b1fe-41d7-9901-382b0da55ef3"
+        },
+        {
+          "upstream_key": "Keyboard/c44d9c4e-9842-4e7d-958f-807f11b7e4fa"
+        },
+        {
+          "upstream_key": "Keyboard/cc00fa79-4fd4-418a-a54f-0d9e00ff5d47"
+        },
+        {
+          "upstream_key": "Keyboard/cd39428e-32f0-4afe-9c6b-1b13b7baa5b7"
+        },
+        {
+          "upstream_key": "Keyboard/d418e1d9-f1dd-45b6-9d84-b4dfdec852f4"
+        },
+        {
+          "upstream_key": "Keyboard/d5fd07f6-c087-4570-a0fd-dcbec6941bc3"
+        },
+        {
+          "upstream_key": "Keyboard/d79fbb3b-4537-4206-8d1b-636e36aed87c"
+        },
+        {
+          "upstream_key": "Keyboard/e0d4d53d-ad46-4d76-8940-12d687aa31e1"
+        },
+        {
+          "upstream_key": "Keyboard/e22b51a3-8e85-42a1-8d4e-f9db13f923ed"
+        },
+        {
+          "upstream_key": "Keyboard/e64c5c26-8ca7-4763-be3e-4d422e19e232"
+        },
+        {
+          "upstream_key": "Keyboard/f3aa03b5-3240-436f-abc7-6df282ed7e91"
+        },
+        {
+          "upstream_key": "Keyboard/f84b83c7-dda7-4edb-8e2e-d6b39f26a07d"
+        },
+        {
+          "upstream_key": "Keyboard/f852331d-f80d-418d-8703-4e4422293abe"
+        },
+        {
+          "upstream_key": "Keyboard/f913f6cc-52b8-4c0a-9e08-e76e3346b3a8"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/030c689a-fcd6-495b-afb2-0b666a461d06"
+        },
+        {
+          "upstream_key": "Keyboard/1e7ea52d-3cff-4dbd-a429-4caeb7191c98"
+        },
+        {
+          "upstream_key": "Keyboard/1ee3b6f1-d17b-45d8-be8d-62a88753f9cd"
+        },
+        {
+          "upstream_key": "Keyboard/2b29e0b4-61e9-48fe-b1c5-59373fd4374f"
+        },
+        {
+          "upstream_key": "Keyboard/3af1de18-8601-4881-9c03-3a61d32bd444"
+        },
+        {
+          "upstream_key": "Keyboard/3c371606-d146-44ef-b5ae-628a5ccfdac3"
+        },
+        {
+          "upstream_key": "Keyboard/3f28e10b-f532-4504-8590-e2b4a26f801a"
+        },
+        {
+          "upstream_key": "Keyboard/401d134f-b6d4-4698-bf1d-c2ad93823297"
+        },
+        {
+          "upstream_key": "Keyboard/4d239c02-3bf1-45d6-9d94-fa3c096eb87a"
+        },
+        {
+          "upstream_key": "Keyboard/596eb29b-032f-44e7-8c55-44c1da11c754"
+        },
+        {
+          "upstream_key": "Keyboard/5a6043dd-7a6d-44d1-8814-f0ed855a2f37"
+        },
+        {
+          "upstream_key": "Keyboard/635ff402-cb3b-459d-bd24-1648a9a1f589"
+        },
+        {
+          "upstream_key": "Keyboard/66deb0b7-21df-4835-9ea6-736f62ddd7c3"
+        },
+        {
+          "upstream_key": "Keyboard/703828ab-77c7-4eaf-9454-01f2bd9a0315"
+        },
+        {
+          "upstream_key": "Keyboard/7691a0b7-1fd5-4759-8f7a-172de95f772a"
+        },
+        {
+          "upstream_key": "Keyboard/7784d270-0f32-4bf9-a0b5-e6b8d8711bae"
+        },
+        {
+          "upstream_key": "Keyboard/851a10b9-aaf7-4079-91d0-8d26edf77523"
+        },
+        {
+          "upstream_key": "Keyboard/9a5a0d0e-dc44-4e78-844c-2c032b919b63"
+        },
+        {
+          "upstream_key": "Keyboard/9bf96498-5bcd-43e1-bc48-ebbb302e5b3a"
+        },
+        {
+          "upstream_key": "Keyboard/b2fbf415-5df2-4e3a-a2f8-5ed12a92400b"
+        },
+        {
+          "upstream_key": "Keyboard/bf683249-b1fe-41d7-9901-382b0da55ef3"
+        },
+        {
+          "upstream_key": "Keyboard/c44d9c4e-9842-4e7d-958f-807f11b7e4fa"
+        },
+        {
+          "upstream_key": "Keyboard/cc00fa79-4fd4-418a-a54f-0d9e00ff5d47"
+        },
+        {
+          "upstream_key": "Keyboard/cd39428e-32f0-4afe-9c6b-1b13b7baa5b7"
+        },
+        {
+          "upstream_key": "Keyboard/d418e1d9-f1dd-45b6-9d84-b4dfdec852f4"
+        },
+        {
+          "upstream_key": "Keyboard/d5fd07f6-c087-4570-a0fd-dcbec6941bc3"
+        },
+        {
+          "upstream_key": "Keyboard/d79fbb3b-4537-4206-8d1b-636e36aed87c"
+        },
+        {
+          "upstream_key": "Keyboard/e0d4d53d-ad46-4d76-8940-12d687aa31e1"
+        },
+        {
+          "upstream_key": "Keyboard/e22b51a3-8e85-42a1-8d4e-f9db13f923ed"
+        },
+        {
+          "upstream_key": "Keyboard/e64c5c26-8ca7-4763-be3e-4d422e19e232"
+        },
+        {
+          "upstream_key": "Keyboard/f3aa03b5-3240-436f-abc7-6df282ed7e91"
+        },
+        {
+          "upstream_key": "Keyboard/f84b83c7-dda7-4edb-8e2e-d6b39f26a07d"
+        },
+        {
+          "upstream_key": "Keyboard/f852331d-f80d-418d-8703-4e4422293abe"
+        },
+        {
+          "upstream_key": "Keyboard/f913f6cc-52b8-4c0a-9e08-e76e3346b3a8"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bKeychron Q1\\b/i, AND explicit search constraints. All 34 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-keyboard-10",
+    "category": "keyboard",
+    "query": "aula",
+    "class": "typed_spec",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/0ed3cc58-5445-4f78-b568-5b07fb64b996"
+        },
+        {
+          "upstream_key": "Keyboard/24cbfcd7-1edc-41c2-a6d3-2251f0a96245"
+        },
+        {
+          "upstream_key": "Keyboard/31b16f82-6c8c-404d-9a9e-1b06985e3c78"
+        },
+        {
+          "upstream_key": "Keyboard/482d8cc6-30a5-4d6c-a9e2-c80b1d5124cd"
+        },
+        {
+          "upstream_key": "Keyboard/68d72fd6-ef21-488c-9426-5c8d9d21c2f1"
+        },
+        {
+          "upstream_key": "Keyboard/6a73c04a-0e17-4129-92b4-971e8be7a7a5"
+        },
+        {
+          "upstream_key": "Keyboard/7007dbe0-93ca-44b6-946a-4832b8eabff8"
+        },
+        {
+          "upstream_key": "Keyboard/7fcee783-3301-479a-9e96-deeddb32d2a4"
+        },
+        {
+          "upstream_key": "Keyboard/8b208e31-99c4-47ca-8290-6656e5a74a38"
+        },
+        {
+          "upstream_key": "Keyboard/a09b8c1f-ec57-4159-87c2-384fa283b698"
+        },
+        {
+          "upstream_key": "Keyboard/a727dd29-9291-430e-9ae7-37069a91ec05"
+        },
+        {
+          "upstream_key": "Keyboard/c6f05aee-affa-4a5d-8816-f61e42675f13"
+        },
+        {
+          "upstream_key": "Keyboard/cf92235e-4086-4192-869c-4e5654b17045"
+        },
+        {
+          "upstream_key": "Keyboard/d0e71a19-9a77-41c8-a810-4bec219eca45"
+        },
+        {
+          "upstream_key": "Keyboard/d32ae27d-db29-45f0-b52e-60afb3182b1c"
+        },
+        {
+          "upstream_key": "Keyboard/d6ca64fc-e739-4a99-a121-095ffa0ec8fa"
+        },
+        {
+          "upstream_key": "Keyboard/dbf89efc-62b3-49c3-89b8-13af32f06016"
+        },
+        {
+          "upstream_key": "Keyboard/dff9f9c0-59c8-4c25-a21c-f65c73b7d6ee"
+        },
+        {
+          "upstream_key": "Keyboard/e6c31e4c-d20f-4440-8f08-c815a0c66eca"
+        },
+        {
+          "upstream_key": "Keyboard/ec225f06-48e9-420b-940b-f6225df993b5"
+        },
+        {
+          "upstream_key": "Keyboard/f0ed674d-9b99-4c49-bbcd-df6371f4f646"
+        }
+      ]
+    },
+    "search": {
+      "filters": {
+        "switch_type": "Linear"
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/0ed3cc58-5445-4f78-b568-5b07fb64b996"
+        },
+        {
+          "upstream_key": "Keyboard/24cbfcd7-1edc-41c2-a6d3-2251f0a96245"
+        },
+        {
+          "upstream_key": "Keyboard/31b16f82-6c8c-404d-9a9e-1b06985e3c78"
+        },
+        {
+          "upstream_key": "Keyboard/482d8cc6-30a5-4d6c-a9e2-c80b1d5124cd"
+        },
+        {
+          "upstream_key": "Keyboard/68d72fd6-ef21-488c-9426-5c8d9d21c2f1"
+        },
+        {
+          "upstream_key": "Keyboard/6a73c04a-0e17-4129-92b4-971e8be7a7a5"
+        },
+        {
+          "upstream_key": "Keyboard/7007dbe0-93ca-44b6-946a-4832b8eabff8"
+        },
+        {
+          "upstream_key": "Keyboard/7fcee783-3301-479a-9e96-deeddb32d2a4"
+        },
+        {
+          "upstream_key": "Keyboard/8b208e31-99c4-47ca-8290-6656e5a74a38"
+        },
+        {
+          "upstream_key": "Keyboard/a09b8c1f-ec57-4159-87c2-384fa283b698"
+        },
+        {
+          "upstream_key": "Keyboard/a727dd29-9291-430e-9ae7-37069a91ec05"
+        },
+        {
+          "upstream_key": "Keyboard/c6f05aee-affa-4a5d-8816-f61e42675f13"
+        },
+        {
+          "upstream_key": "Keyboard/cf92235e-4086-4192-869c-4e5654b17045"
+        },
+        {
+          "upstream_key": "Keyboard/d0e71a19-9a77-41c8-a810-4bec219eca45"
+        },
+        {
+          "upstream_key": "Keyboard/d32ae27d-db29-45f0-b52e-60afb3182b1c"
+        },
+        {
+          "upstream_key": "Keyboard/d6ca64fc-e739-4a99-a121-095ffa0ec8fa"
+        },
+        {
+          "upstream_key": "Keyboard/dbf89efc-62b3-49c3-89b8-13af32f06016"
+        },
+        {
+          "upstream_key": "Keyboard/dff9f9c0-59c8-4c25-a21c-f65c73b7d6ee"
+        },
+        {
+          "upstream_key": "Keyboard/e6c31e4c-d20f-4440-8f08-c815a0c66eca"
+        },
+        {
+          "upstream_key": "Keyboard/ec225f06-48e9-420b-940b-f6225df993b5"
+        },
+        {
+          "upstream_key": "Keyboard/f0ed674d-9b99-4c49-bbcd-df6371f4f646"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bAULA\\b/i, AND explicit search constraints. All 21 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-keyboard-11",
+    "category": "keyboard",
+    "query": "aula",
+    "class": "facet",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/14c7d9f3-6c34-4bd1-b45c-6de17548947f"
+        },
+        {
+          "upstream_key": "Keyboard/2ddea04e-79ed-4fb8-a033-b1f9466f480a"
+        },
+        {
+          "upstream_key": "Keyboard/31888e95-eaa6-4634-942b-73e2b237c188"
+        },
+        {
+          "upstream_key": "Keyboard/31b16f82-6c8c-404d-9a9e-1b06985e3c78"
+        },
+        {
+          "upstream_key": "Keyboard/331d4713-d939-4e8c-95ef-7322ae49b561"
+        },
+        {
+          "upstream_key": "Keyboard/411eb9be-b353-4818-b650-88c1d962abc5"
+        },
+        {
+          "upstream_key": "Keyboard/425a260d-7657-4182-a432-9a8bcb884503"
+        },
+        {
+          "upstream_key": "Keyboard/5e263d8f-2f08-445f-ae30-a5008dc4c4d0"
+        },
+        {
+          "upstream_key": "Keyboard/60b7f559-cedd-4c3c-89eb-9ebd4ca66327"
+        },
+        {
+          "upstream_key": "Keyboard/7007dbe0-93ca-44b6-946a-4832b8eabff8"
+        },
+        {
+          "upstream_key": "Keyboard/a10a0f74-50de-464a-8857-f226c8e00260"
+        },
+        {
+          "upstream_key": "Keyboard/bad4662d-7682-4b88-a217-ed79fbfd1ee4"
+        },
+        {
+          "upstream_key": "Keyboard/c66b10cb-931e-4944-9256-c81de79059a0"
+        },
+        {
+          "upstream_key": "Keyboard/cddd22ac-6c11-46d0-b166-76b52b8bf0bf"
+        },
+        {
+          "upstream_key": "Keyboard/d9c00228-7124-4eb7-93db-0c03384b587f"
+        },
+        {
+          "upstream_key": "Keyboard/e6c31e4c-d20f-4440-8f08-c815a0c66eca"
+        },
+        {
+          "upstream_key": "Keyboard/ec225f06-48e9-420b-940b-f6225df993b5"
+        },
+        {
+          "upstream_key": "Keyboard/f5d0ed59-b1b8-4f49-897f-90a7a2dc1d1f"
+        },
+        {
+          "upstream_key": "Keyboard/fe8d1684-b9a1-40f2-ad92-e124efc19f31"
+        }
+      ]
+    },
+    "search": {
+      "facets": {
+        "connectivity": "Bluetooth"
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/14c7d9f3-6c34-4bd1-b45c-6de17548947f"
+        },
+        {
+          "upstream_key": "Keyboard/2ddea04e-79ed-4fb8-a033-b1f9466f480a"
+        },
+        {
+          "upstream_key": "Keyboard/31888e95-eaa6-4634-942b-73e2b237c188"
+        },
+        {
+          "upstream_key": "Keyboard/31b16f82-6c8c-404d-9a9e-1b06985e3c78"
+        },
+        {
+          "upstream_key": "Keyboard/331d4713-d939-4e8c-95ef-7322ae49b561"
+        },
+        {
+          "upstream_key": "Keyboard/411eb9be-b353-4818-b650-88c1d962abc5"
+        },
+        {
+          "upstream_key": "Keyboard/425a260d-7657-4182-a432-9a8bcb884503"
+        },
+        {
+          "upstream_key": "Keyboard/5e263d8f-2f08-445f-ae30-a5008dc4c4d0"
+        },
+        {
+          "upstream_key": "Keyboard/60b7f559-cedd-4c3c-89eb-9ebd4ca66327"
+        },
+        {
+          "upstream_key": "Keyboard/7007dbe0-93ca-44b6-946a-4832b8eabff8"
+        },
+        {
+          "upstream_key": "Keyboard/a10a0f74-50de-464a-8857-f226c8e00260"
+        },
+        {
+          "upstream_key": "Keyboard/bad4662d-7682-4b88-a217-ed79fbfd1ee4"
+        },
+        {
+          "upstream_key": "Keyboard/c66b10cb-931e-4944-9256-c81de79059a0"
+        },
+        {
+          "upstream_key": "Keyboard/cddd22ac-6c11-46d0-b166-76b52b8bf0bf"
+        },
+        {
+          "upstream_key": "Keyboard/d9c00228-7124-4eb7-93db-0c03384b587f"
+        },
+        {
+          "upstream_key": "Keyboard/e6c31e4c-d20f-4440-8f08-c815a0c66eca"
+        },
+        {
+          "upstream_key": "Keyboard/ec225f06-48e9-420b-940b-f6225df993b5"
+        },
+        {
+          "upstream_key": "Keyboard/f5d0ed59-b1b8-4f49-897f-90a7a2dc1d1f"
+        },
+        {
+          "upstream_key": "Keyboard/fe8d1684-b9a1-40f2-ad92-e124efc19f31"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bAULA\\b/i, AND explicit search constraints. All 19 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-keyboard-12",
+    "category": "keyboard",
+    "query": "aula",
+    "class": "range",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/0f844469-c603-4a94-9dc5-13dd2db54a3c"
+        },
+        {
+          "upstream_key": "Keyboard/14c7d9f3-6c34-4bd1-b45c-6de17548947f"
+        },
+        {
+          "upstream_key": "Keyboard/331d4713-d939-4e8c-95ef-7322ae49b561"
+        },
+        {
+          "upstream_key": "Keyboard/3add5509-5730-40d2-acbf-b8d6e7c3c258"
+        },
+        {
+          "upstream_key": "Keyboard/411eb9be-b353-4818-b650-88c1d962abc5"
+        },
+        {
+          "upstream_key": "Keyboard/5220248f-29e5-4cd9-840d-82b3692485e2"
+        },
+        {
+          "upstream_key": "Keyboard/60b7f559-cedd-4c3c-89eb-9ebd4ca66327"
+        },
+        {
+          "upstream_key": "Keyboard/6bbce2ec-3511-4f71-94a6-da952d48a206"
+        },
+        {
+          "upstream_key": "Keyboard/7007dbe0-93ca-44b6-946a-4832b8eabff8"
+        },
+        {
+          "upstream_key": "Keyboard/76460077-0149-4085-aae2-657f398acf1d"
+        },
+        {
+          "upstream_key": "Keyboard/a10a0f74-50de-464a-8857-f226c8e00260"
+        },
+        {
+          "upstream_key": "Keyboard/bad4662d-7682-4b88-a217-ed79fbfd1ee4"
+        },
+        {
+          "upstream_key": "Keyboard/cddd22ac-6c11-46d0-b166-76b52b8bf0bf"
+        },
+        {
+          "upstream_key": "Keyboard/d9c00228-7124-4eb7-93db-0c03384b587f"
+        },
+        {
+          "upstream_key": "Keyboard/dcca565c-c8a9-4d94-af58-490bf5271374"
+        },
+        {
+          "upstream_key": "Keyboard/ec225f06-48e9-420b-940b-f6225df993b5"
+        },
+        {
+          "upstream_key": "Keyboard/f2820e60-0ffc-4e78-8421-d41721cadc34"
+        },
+        {
+          "upstream_key": "Keyboard/f5d0ed59-b1b8-4f49-897f-90a7a2dc1d1f"
+        },
+        {
+          "upstream_key": "Keyboard/fb7babc1-0170-4044-a73f-19b9231cb474"
+        }
+      ]
+    },
+    "search": {
+      "ranges": {
+        "polling_rate_hz": {
+          "min": 1000
+        }
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Keyboard/0f844469-c603-4a94-9dc5-13dd2db54a3c"
+        },
+        {
+          "upstream_key": "Keyboard/14c7d9f3-6c34-4bd1-b45c-6de17548947f"
+        },
+        {
+          "upstream_key": "Keyboard/331d4713-d939-4e8c-95ef-7322ae49b561"
+        },
+        {
+          "upstream_key": "Keyboard/3add5509-5730-40d2-acbf-b8d6e7c3c258"
+        },
+        {
+          "upstream_key": "Keyboard/411eb9be-b353-4818-b650-88c1d962abc5"
+        },
+        {
+          "upstream_key": "Keyboard/5220248f-29e5-4cd9-840d-82b3692485e2"
+        },
+        {
+          "upstream_key": "Keyboard/60b7f559-cedd-4c3c-89eb-9ebd4ca66327"
+        },
+        {
+          "upstream_key": "Keyboard/6bbce2ec-3511-4f71-94a6-da952d48a206"
+        },
+        {
+          "upstream_key": "Keyboard/7007dbe0-93ca-44b6-946a-4832b8eabff8"
+        },
+        {
+          "upstream_key": "Keyboard/76460077-0149-4085-aae2-657f398acf1d"
+        },
+        {
+          "upstream_key": "Keyboard/a10a0f74-50de-464a-8857-f226c8e00260"
+        },
+        {
+          "upstream_key": "Keyboard/bad4662d-7682-4b88-a217-ed79fbfd1ee4"
+        },
+        {
+          "upstream_key": "Keyboard/cddd22ac-6c11-46d0-b166-76b52b8bf0bf"
+        },
+        {
+          "upstream_key": "Keyboard/d9c00228-7124-4eb7-93db-0c03384b587f"
+        },
+        {
+          "upstream_key": "Keyboard/dcca565c-c8a9-4d94-af58-490bf5271374"
+        },
+        {
+          "upstream_key": "Keyboard/ec225f06-48e9-420b-940b-f6225df993b5"
+        },
+        {
+          "upstream_key": "Keyboard/f2820e60-0ffc-4e78-8421-d41721cadc34"
+        },
+        {
+          "upstream_key": "Keyboard/f5d0ed59-b1b8-4f49-897f-90a7a2dc1d1f"
+        },
+        {
+          "upstream_key": "Keyboard/fb7babc1-0170-4044-a73f-19b9231cb474"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bAULA\\b/i, AND explicit search constraints. All 19 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-mouse-01",
+    "category": "mouse",
+    "query": "Logitech MX Master 3",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/fe670d09-2136-4aae-9705-757e5039b9f6"
+    }
+  },
+  {
+    "id": "ext-mouse-02",
+    "category": "mouse",
+    "query": "Logitech G502 HERO High Performance Gaming Mouse",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/b727b264-7909-4487-9cfb-cab0458816f3"
+    }
+  },
+  {
+    "id": "ext-mouse-03",
+    "category": "mouse",
+    "query": "G502HERO",
+    "class": "compact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/19377571-877c-41a4-81cc-43ca813cf646"
+    }
+  },
+  {
+    "id": "ext-mouse-04",
+    "category": "mouse",
+    "query": "DeathAdder V3 Pro Faker Edition",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/aa282b84-406c-4829-9fa9-9cae47fefcb6"
+    }
+  },
+  {
+    "id": "ext-mouse-05",
+    "category": "mouse",
+    "query": "Razer DeathAdder V3 HyperSpeed",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/0701b5a3-1d66-4321-a393-b0daed7e3705"
+    }
+  },
+  {
+    "id": "ext-mouse-06",
+    "category": "mouse",
+    "query": "MX Master 3S Business Graphite",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/a630f2ce-5d1e-4006-835b-13dc514887b5"
+    }
+  },
+  {
+    "id": "ext-mouse-07",
+    "category": "mouse",
+    "query": "0097855151544",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/fe670d09-2136-4aae-9705-757e5039b9f6"
+    },
+    "search": {
+      "identifier": {
+        "type": "ean",
+        "value": "0097855151544"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-mouse-08",
+    "category": "mouse",
+    "query": "910-005469",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mouse/b727b264-7909-4487-9cfb-cab0458816f3"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "910-005469"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-mouse-09",
+    "category": "mouse",
+    "query": "logitech mx master",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/03edc7b3-d50e-4635-9382-76aa52904252"
+        },
+        {
+          "upstream_key": "Mouse/0db843ff-8368-4d63-bb55-7737a699c664"
+        },
+        {
+          "upstream_key": "Mouse/2e15fb2b-db3f-464f-a3c6-d46253a5c1f7"
+        },
+        {
+          "upstream_key": "Mouse/4964a414-355e-4715-9a5f-643c91fee75f"
+        },
+        {
+          "upstream_key": "Mouse/61c367cb-3244-453b-b69f-05f09f4b6173"
+        },
+        {
+          "upstream_key": "Mouse/6be38aac-4750-48f4-8c97-c807b8c52634"
+        },
+        {
+          "upstream_key": "Mouse/836c3178-e8b9-46b7-ae2a-7fe481ff400c"
+        },
+        {
+          "upstream_key": "Mouse/8dbbb370-b285-434f-a48e-93c9fa2ec9eb"
+        },
+        {
+          "upstream_key": "Mouse/8e54f31d-6bda-4cb5-a372-adadf3c9c9f3"
+        },
+        {
+          "upstream_key": "Mouse/8f7295b8-ea82-4d95-97de-6eb1ffc6890b"
+        },
+        {
+          "upstream_key": "Mouse/90f473ab-61d3-4a85-a8ea-5f488d349fdd"
+        },
+        {
+          "upstream_key": "Mouse/95a0010b-83bc-42ff-8b4a-7fd3640e6245"
+        },
+        {
+          "upstream_key": "Mouse/a06284b1-cd72-4ed5-9620-314f450195ea"
+        },
+        {
+          "upstream_key": "Mouse/a630f2ce-5d1e-4006-835b-13dc514887b5"
+        },
+        {
+          "upstream_key": "Mouse/a631a53a-3b26-45dd-955e-776b8fd794c3"
+        },
+        {
+          "upstream_key": "Mouse/b8183705-19d4-4d4e-85c2-a71e9eac67b7"
+        },
+        {
+          "upstream_key": "Mouse/bea29dec-d1f7-4bca-af37-a94571b5cfa6"
+        },
+        {
+          "upstream_key": "Mouse/ca1ed3c2-c226-41d1-b7df-0270471d895b"
+        },
+        {
+          "upstream_key": "Mouse/e77ffe1f-33ae-48af-a740-397822c1c8e3"
+        },
+        {
+          "upstream_key": "Mouse/f1bed679-de34-4375-87cb-06b8e4c7c1c5"
+        },
+        {
+          "upstream_key": "Mouse/f75cda25-aa11-49c9-a6d6-3d117cd37519"
+        },
+        {
+          "upstream_key": "Mouse/f9d874df-17d4-4b7e-950b-27e6ca872529"
+        },
+        {
+          "upstream_key": "Mouse/fe670d09-2136-4aae-9705-757e5039b9f6"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/03edc7b3-d50e-4635-9382-76aa52904252"
+        },
+        {
+          "upstream_key": "Mouse/0db843ff-8368-4d63-bb55-7737a699c664"
+        },
+        {
+          "upstream_key": "Mouse/2e15fb2b-db3f-464f-a3c6-d46253a5c1f7"
+        },
+        {
+          "upstream_key": "Mouse/4964a414-355e-4715-9a5f-643c91fee75f"
+        },
+        {
+          "upstream_key": "Mouse/61c367cb-3244-453b-b69f-05f09f4b6173"
+        },
+        {
+          "upstream_key": "Mouse/6be38aac-4750-48f4-8c97-c807b8c52634"
+        },
+        {
+          "upstream_key": "Mouse/836c3178-e8b9-46b7-ae2a-7fe481ff400c"
+        },
+        {
+          "upstream_key": "Mouse/8dbbb370-b285-434f-a48e-93c9fa2ec9eb"
+        },
+        {
+          "upstream_key": "Mouse/8e54f31d-6bda-4cb5-a372-adadf3c9c9f3"
+        },
+        {
+          "upstream_key": "Mouse/8f7295b8-ea82-4d95-97de-6eb1ffc6890b"
+        },
+        {
+          "upstream_key": "Mouse/90f473ab-61d3-4a85-a8ea-5f488d349fdd"
+        },
+        {
+          "upstream_key": "Mouse/95a0010b-83bc-42ff-8b4a-7fd3640e6245"
+        },
+        {
+          "upstream_key": "Mouse/a06284b1-cd72-4ed5-9620-314f450195ea"
+        },
+        {
+          "upstream_key": "Mouse/a630f2ce-5d1e-4006-835b-13dc514887b5"
+        },
+        {
+          "upstream_key": "Mouse/a631a53a-3b26-45dd-955e-776b8fd794c3"
+        },
+        {
+          "upstream_key": "Mouse/b8183705-19d4-4d4e-85c2-a71e9eac67b7"
+        },
+        {
+          "upstream_key": "Mouse/bea29dec-d1f7-4bca-af37-a94571b5cfa6"
+        },
+        {
+          "upstream_key": "Mouse/ca1ed3c2-c226-41d1-b7df-0270471d895b"
+        },
+        {
+          "upstream_key": "Mouse/e77ffe1f-33ae-48af-a740-397822c1c8e3"
+        },
+        {
+          "upstream_key": "Mouse/f1bed679-de34-4375-87cb-06b8e4c7c1c5"
+        },
+        {
+          "upstream_key": "Mouse/f75cda25-aa11-49c9-a6d6-3d117cd37519"
+        },
+        {
+          "upstream_key": "Mouse/f9d874df-17d4-4b7e-950b-27e6ca872529"
+        },
+        {
+          "upstream_key": "Mouse/fe670d09-2136-4aae-9705-757e5039b9f6"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bLogitech MX Master\\b/i, AND explicit search constraints. All 23 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-mouse-10",
+    "category": "mouse",
+    "query": "razer",
+    "class": "typed_spec",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/41a888b5-f484-4559-8355-7092c96e5b97"
+        },
+        {
+          "upstream_key": "Mouse/50a10fe4-aca8-48a4-8e45-5ac0ede8a5c2"
+        },
+        {
+          "upstream_key": "Mouse/aa282b84-406c-4829-9fa9-9cae47fefcb6"
+        },
+        {
+          "upstream_key": "Mouse/aa412d9b-5d58-4d41-bb01-0bf449c8c1d1"
+        }
+      ]
+    },
+    "search": {
+      "filters": {
+        "shape": "Ergonomic"
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/41a888b5-f484-4559-8355-7092c96e5b97"
+        },
+        {
+          "upstream_key": "Mouse/50a10fe4-aca8-48a4-8e45-5ac0ede8a5c2"
+        },
+        {
+          "upstream_key": "Mouse/aa282b84-406c-4829-9fa9-9cae47fefcb6"
+        },
+        {
+          "upstream_key": "Mouse/aa412d9b-5d58-4d41-bb01-0bf449c8c1d1"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bRazer\\b/i, AND explicit search constraints. All 4 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-mouse-11",
+    "category": "mouse",
+    "query": "logitech mx master",
+    "class": "facet",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/03edc7b3-d50e-4635-9382-76aa52904252"
+        },
+        {
+          "upstream_key": "Mouse/0db843ff-8368-4d63-bb55-7737a699c664"
+        },
+        {
+          "upstream_key": "Mouse/836c3178-e8b9-46b7-ae2a-7fe481ff400c"
+        },
+        {
+          "upstream_key": "Mouse/a630f2ce-5d1e-4006-835b-13dc514887b5"
+        },
+        {
+          "upstream_key": "Mouse/ca1ed3c2-c226-41d1-b7df-0270471d895b"
+        },
+        {
+          "upstream_key": "Mouse/f1bed679-de34-4375-87cb-06b8e4c7c1c5"
+        },
+        {
+          "upstream_key": "Mouse/f75cda25-aa11-49c9-a6d6-3d117cd37519"
+        }
+      ]
+    },
+    "search": {
+      "facets": {
+        "connectivity": "Bluetooth"
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/03edc7b3-d50e-4635-9382-76aa52904252"
+        },
+        {
+          "upstream_key": "Mouse/0db843ff-8368-4d63-bb55-7737a699c664"
+        },
+        {
+          "upstream_key": "Mouse/836c3178-e8b9-46b7-ae2a-7fe481ff400c"
+        },
+        {
+          "upstream_key": "Mouse/a630f2ce-5d1e-4006-835b-13dc514887b5"
+        },
+        {
+          "upstream_key": "Mouse/ca1ed3c2-c226-41d1-b7df-0270471d895b"
+        },
+        {
+          "upstream_key": "Mouse/f1bed679-de34-4375-87cb-06b8e4c7c1c5"
+        },
+        {
+          "upstream_key": "Mouse/f75cda25-aa11-49c9-a6d6-3d117cd37519"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bLogitech MX Master\\b/i, AND explicit search constraints. All 7 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-mouse-12",
+    "category": "mouse",
+    "query": "razer",
+    "class": "range",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/0e3ecdb4-a2e6-4191-b8bb-80f3c5cd6c9c"
+        },
+        {
+          "upstream_key": "Mouse/19e82eba-aa3f-4ed3-88fb-486b28a084ed"
+        },
+        {
+          "upstream_key": "Mouse/1da66939-2631-428d-9aa6-1e6b8d52001a"
+        },
+        {
+          "upstream_key": "Mouse/2a971a84-6cb7-4365-a3ba-ebaa1666b6f6"
+        },
+        {
+          "upstream_key": "Mouse/34e04599-23cd-4799-a3a3-9fb070f978f8"
+        },
+        {
+          "upstream_key": "Mouse/41a888b5-f484-4559-8355-7092c96e5b97"
+        },
+        {
+          "upstream_key": "Mouse/50a10fe4-aca8-48a4-8e45-5ac0ede8a5c2"
+        },
+        {
+          "upstream_key": "Mouse/61e8b48a-9f50-41de-ba3a-67c4162711d4"
+        },
+        {
+          "upstream_key": "Mouse/7605450a-7622-4fa1-9c71-637748863049"
+        },
+        {
+          "upstream_key": "Mouse/aa282b84-406c-4829-9fa9-9cae47fefcb6"
+        },
+        {
+          "upstream_key": "Mouse/aa412d9b-5d58-4d41-bb01-0bf449c8c1d1"
+        },
+        {
+          "upstream_key": "Mouse/c0a9c9b8-e0b3-49fb-8398-d3d0661cc87c"
+        },
+        {
+          "upstream_key": "Mouse/f3fb6bfd-05dc-4e6b-b633-d781cd3b309e"
+        }
+      ]
+    },
+    "search": {
+      "ranges": {
+        "weight_g": {
+          "max": 70
+        }
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Mouse/0e3ecdb4-a2e6-4191-b8bb-80f3c5cd6c9c"
+        },
+        {
+          "upstream_key": "Mouse/19e82eba-aa3f-4ed3-88fb-486b28a084ed"
+        },
+        {
+          "upstream_key": "Mouse/1da66939-2631-428d-9aa6-1e6b8d52001a"
+        },
+        {
+          "upstream_key": "Mouse/2a971a84-6cb7-4365-a3ba-ebaa1666b6f6"
+        },
+        {
+          "upstream_key": "Mouse/34e04599-23cd-4799-a3a3-9fb070f978f8"
+        },
+        {
+          "upstream_key": "Mouse/41a888b5-f484-4559-8355-7092c96e5b97"
+        },
+        {
+          "upstream_key": "Mouse/50a10fe4-aca8-48a4-8e45-5ac0ede8a5c2"
+        },
+        {
+          "upstream_key": "Mouse/61e8b48a-9f50-41de-ba3a-67c4162711d4"
+        },
+        {
+          "upstream_key": "Mouse/7605450a-7622-4fa1-9c71-637748863049"
+        },
+        {
+          "upstream_key": "Mouse/aa282b84-406c-4829-9fa9-9cae47fefcb6"
+        },
+        {
+          "upstream_key": "Mouse/aa412d9b-5d58-4d41-bb01-0bf449c8c1d1"
+        },
+        {
+          "upstream_key": "Mouse/c0a9c9b8-e0b3-49fb-8398-d3d0661cc87c"
+        },
+        {
+          "upstream_key": "Mouse/f3fb6bfd-05dc-4e6b-b633-d781cd3b309e"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bRazer\\b/i, AND explicit search constraints. All 13 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-monitor-01",
+    "category": "monitor",
+    "query": "VG27AQ",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/1f541617-7eb7-452e-82dc-c3ce08af8001"
+    }
+  },
+  {
+    "id": "ext-monitor-02",
+    "category": "monitor",
+    "query": "AW3423DWF",
+    "class": "compact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/1fb33721-265a-4807-a5c6-9365a1938c55"
+    }
+  },
+  {
+    "id": "ext-monitor-03",
+    "category": "monitor",
+    "query": "LG 27GP850-B",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/23f9bbc9-05c9-45a5-830f-60b4056baa15"
+    }
+  },
+  {
+    "id": "ext-monitor-04",
+    "category": "monitor",
+    "query": "Gigabyte M27Q-P",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/2bfe1aad-b965-4180-b18b-fcdd96c2f14e"
+    }
+  },
+  {
+    "id": "ext-monitor-05",
+    "category": "monitor",
+    "query": "Gigabyte M27Q-X",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/60d325b7-1e1f-4f01-b900-4f1e05267ed3"
+    }
+  },
+  {
+    "id": "ext-monitor-06",
+    "category": "monitor",
+    "query": "Gigabyte M27Q rev 2.0",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/8c481254-0c3e-40b9-9d72-54fc7243fec5"
+    }
+  },
+  {
+    "id": "ext-monitor-07",
+    "category": "monitor",
+    "query": "90LM0500-B01370",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/1f541617-7eb7-452e-82dc-c3ce08af8001"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "90LM0500-B01370"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-monitor-08",
+    "category": "monitor",
+    "query": "27GP850-B",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Monitor/23f9bbc9-05c9-45a5-830f-60b4056baa15"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "27GP850-B"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-monitor-09",
+    "category": "monitor",
+    "query": "odyssey g7",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/0507b791-8b59-471d-b683-f4dfbfc6910c"
+        },
+        {
+          "upstream_key": "Monitor/095f7c6f-f43c-46ad-b51f-13f512360b73"
+        },
+        {
+          "upstream_key": "Monitor/0ca44343-6d04-4d22-aeef-b10b46a22b1f"
+        },
+        {
+          "upstream_key": "Monitor/24177d75-b963-4af8-a9aa-09d5c110bca9"
+        },
+        {
+          "upstream_key": "Monitor/4289f38e-1461-47f6-8897-5d19c26c2e01"
+        },
+        {
+          "upstream_key": "Monitor/43e1a417-c643-4735-a7cd-f8b02a495b68"
+        },
+        {
+          "upstream_key": "Monitor/51a479e1-861e-45a5-b794-fa02eb505559"
+        },
+        {
+          "upstream_key": "Monitor/60429e3d-dc3b-4720-9f51-3fcf65f0bcb2"
+        },
+        {
+          "upstream_key": "Monitor/63fc5a69-8a76-409c-914e-3accc11b6a6d"
+        },
+        {
+          "upstream_key": "Monitor/77dfebff-497f-49ae-bd0e-a45fa541599b"
+        },
+        {
+          "upstream_key": "Monitor/9ae1dd43-d05c-4dae-a215-9cc5f72db2f3"
+        },
+        {
+          "upstream_key": "Monitor/a3e908ad-56b8-48a2-b8d8-5b5886cdd823"
+        },
+        {
+          "upstream_key": "Monitor/b8521c38-e2e9-4ec6-ad0a-91b284d88785"
+        },
+        {
+          "upstream_key": "Monitor/c561a1ee-aa94-48d7-8e5b-fdb578897794"
+        },
+        {
+          "upstream_key": "Monitor/f4686d63-24b6-4774-8e18-1be4667fe6bb"
+        },
+        {
+          "upstream_key": "Monitor/fac33ffd-fa07-45bb-bd1c-440b4998bcb2"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/0507b791-8b59-471d-b683-f4dfbfc6910c"
+        },
+        {
+          "upstream_key": "Monitor/095f7c6f-f43c-46ad-b51f-13f512360b73"
+        },
+        {
+          "upstream_key": "Monitor/0ca44343-6d04-4d22-aeef-b10b46a22b1f"
+        },
+        {
+          "upstream_key": "Monitor/24177d75-b963-4af8-a9aa-09d5c110bca9"
+        },
+        {
+          "upstream_key": "Monitor/4289f38e-1461-47f6-8897-5d19c26c2e01"
+        },
+        {
+          "upstream_key": "Monitor/43e1a417-c643-4735-a7cd-f8b02a495b68"
+        },
+        {
+          "upstream_key": "Monitor/51a479e1-861e-45a5-b794-fa02eb505559"
+        },
+        {
+          "upstream_key": "Monitor/60429e3d-dc3b-4720-9f51-3fcf65f0bcb2"
+        },
+        {
+          "upstream_key": "Monitor/63fc5a69-8a76-409c-914e-3accc11b6a6d"
+        },
+        {
+          "upstream_key": "Monitor/77dfebff-497f-49ae-bd0e-a45fa541599b"
+        },
+        {
+          "upstream_key": "Monitor/9ae1dd43-d05c-4dae-a215-9cc5f72db2f3"
+        },
+        {
+          "upstream_key": "Monitor/a3e908ad-56b8-48a2-b8d8-5b5886cdd823"
+        },
+        {
+          "upstream_key": "Monitor/b8521c38-e2e9-4ec6-ad0a-91b284d88785"
+        },
+        {
+          "upstream_key": "Monitor/c561a1ee-aa94-48d7-8e5b-fdb578897794"
+        },
+        {
+          "upstream_key": "Monitor/f4686d63-24b6-4774-8e18-1be4667fe6bb"
+        },
+        {
+          "upstream_key": "Monitor/fac33ffd-fa07-45bb-bd1c-440b4998bcb2"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bOdyssey G7\\b/i, AND explicit search constraints. All 16 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-monitor-10",
+    "category": "monitor",
+    "query": "asus",
+    "class": "typed_spec",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/03ee2949-db7b-43e8-b381-838d67c9e0cd"
+        },
+        {
+          "upstream_key": "Monitor/0574e5f9-456d-4499-b8fe-72edec944faf"
+        },
+        {
+          "upstream_key": "Monitor/06fed44d-ae1b-4d4e-91d6-f30245a3701a"
+        },
+        {
+          "upstream_key": "Monitor/0a7688e1-2e73-4335-9c9a-26cc7c6c8e59"
+        },
+        {
+          "upstream_key": "Monitor/0acec31b-de0a-45ca-a1e6-cd5c163b0aeb"
+        },
+        {
+          "upstream_key": "Monitor/159db47d-9866-4707-8099-dfadaaa68ba0"
+        },
+        {
+          "upstream_key": "Monitor/15c30167-49d4-4e72-8219-fc81c55c7164"
+        },
+        {
+          "upstream_key": "Monitor/1b857d40-bb14-41a5-9883-f3cba0fe21aa"
+        },
+        {
+          "upstream_key": "Monitor/1cf7f96a-1a29-403c-b5ed-ce6de10316b7"
+        },
+        {
+          "upstream_key": "Monitor/1f541617-7eb7-452e-82dc-c3ce08af8001"
+        },
+        {
+          "upstream_key": "Monitor/203401b7-9107-4a8c-8dd0-4be45d892dd5"
+        },
+        {
+          "upstream_key": "Monitor/211e53a5-fd87-4a45-ad9f-3f9fc8c8f7a1"
+        },
+        {
+          "upstream_key": "Monitor/22588df4-0373-4aa3-9bb1-69b0fa32e6cd"
+        },
+        {
+          "upstream_key": "Monitor/2459d681-2dcf-48d1-9172-ccd09ef5b551"
+        },
+        {
+          "upstream_key": "Monitor/27e6d909-542d-4dc8-9f3d-0818f604f6fd"
+        },
+        {
+          "upstream_key": "Monitor/27e93de1-91c1-4adf-9888-7918a6a64271"
+        },
+        {
+          "upstream_key": "Monitor/2a280617-f7d0-4678-b1e5-659f07e0c2e4"
+        },
+        {
+          "upstream_key": "Monitor/2d3db9e6-eb45-49e2-ba9b-812fae8c26c5"
+        },
+        {
+          "upstream_key": "Monitor/2e04fee8-e9dc-41b2-9558-0541750ee29a"
+        },
+        {
+          "upstream_key": "Monitor/3332ad73-d801-409e-a863-429272b8a486"
+        },
+        {
+          "upstream_key": "Monitor/364f618a-d949-48fa-8b48-f6c8be79dcfd"
+        },
+        {
+          "upstream_key": "Monitor/3a6742dd-96de-4561-8146-2fbc17d996e2"
+        },
+        {
+          "upstream_key": "Monitor/45799b52-1b5f-4bc0-87d7-396f3217b3db"
+        },
+        {
+          "upstream_key": "Monitor/4878e684-00bd-47de-a77f-0960c387e205"
+        },
+        {
+          "upstream_key": "Monitor/54b1756d-dddc-407c-993e-d26c45a84f99"
+        },
+        {
+          "upstream_key": "Monitor/57c23c7a-b92f-44c3-8b3b-593ee537acd3"
+        },
+        {
+          "upstream_key": "Monitor/5ae0d4ce-cade-41d4-a565-d21d6dbc1f9a"
+        },
+        {
+          "upstream_key": "Monitor/5cc0a1b1-c2e1-4702-adee-85cb230572f2"
+        },
+        {
+          "upstream_key": "Monitor/5d92c2a9-097f-41d3-aee7-26d89c7a5e57"
+        },
+        {
+          "upstream_key": "Monitor/60ae309d-6bb4-4636-86ae-1d1d2459d3ce"
+        },
+        {
+          "upstream_key": "Monitor/672e7079-c899-49c9-9855-ac41a467ebd1"
+        },
+        {
+          "upstream_key": "Monitor/69185473-4c7b-4a5f-ba81-2ebe4150548e"
+        },
+        {
+          "upstream_key": "Monitor/71d531c3-d108-4a2d-a5f4-57c4014c22d7"
+        },
+        {
+          "upstream_key": "Monitor/7b1c121f-ae5e-48d9-a1ae-aa213ec45a22"
+        },
+        {
+          "upstream_key": "Monitor/7edcb2d8-23f2-46e9-9788-b1670df38174"
+        },
+        {
+          "upstream_key": "Monitor/8400456d-5f74-4bca-a6b9-4a4880fd72f9"
+        },
+        {
+          "upstream_key": "Monitor/8c4a2b7a-0734-4282-a978-afa7b372866c"
+        },
+        {
+          "upstream_key": "Monitor/8e2b22af-0ab7-4d6f-b8e5-9d3ab41a5068"
+        },
+        {
+          "upstream_key": "Monitor/90a6c6aa-4192-4d61-ba11-1705ee8d1608"
+        },
+        {
+          "upstream_key": "Monitor/96a07ed6-2425-4da4-8eb2-646f642e78f1"
+        },
+        {
+          "upstream_key": "Monitor/97e9262f-7e29-4bec-b4ee-a00e307f25e8"
+        },
+        {
+          "upstream_key": "Monitor/a0a21475-0207-426c-bc4b-a6b1f9dc9bd8"
+        },
+        {
+          "upstream_key": "Monitor/a1e959c1-993b-4c98-8411-99ce9c0b4b72"
+        },
+        {
+          "upstream_key": "Monitor/a8079620-322d-44fe-abb9-e2ec5acc97da"
+        },
+        {
+          "upstream_key": "Monitor/aa807ada-7c74-4cdb-97cb-2992bb03bfc1"
+        },
+        {
+          "upstream_key": "Monitor/adbf23b2-5ecf-4062-8dc3-325beb2fcf21"
+        },
+        {
+          "upstream_key": "Monitor/adc376af-5b80-45f0-bc03-606ecc502071"
+        },
+        {
+          "upstream_key": "Monitor/b0db29ae-7cd5-4f0c-8641-69ac994fc677"
+        },
+        {
+          "upstream_key": "Monitor/b2be2282-41e4-4fc6-842d-1025625319c5"
+        },
+        {
+          "upstream_key": "Monitor/b7683be9-fafa-483b-b077-99af31be982e"
+        },
+        {
+          "upstream_key": "Monitor/b774bf46-9ebc-464a-a91d-bd8738a788d7"
+        },
+        {
+          "upstream_key": "Monitor/c05d7838-495c-4398-b487-9f39a689f0b1"
+        },
+        {
+          "upstream_key": "Monitor/c62209be-b68a-4799-b5ee-74ffdd1419a9"
+        },
+        {
+          "upstream_key": "Monitor/c82b23fb-c200-45f6-b120-9f5a486fa977"
+        },
+        {
+          "upstream_key": "Monitor/ceed9899-2c02-4d5f-8798-1a6cf540f9d5"
+        },
+        {
+          "upstream_key": "Monitor/cf0cd346-81e4-4da9-9110-891214388ddd"
+        },
+        {
+          "upstream_key": "Monitor/d1462a5f-7705-4a44-969a-1d84a7aa83c1"
+        },
+        {
+          "upstream_key": "Monitor/d185355e-084d-40da-9d10-13c4dc02043b"
+        },
+        {
+          "upstream_key": "Monitor/d4cf9a7b-dfe5-482a-aa5c-2e589a69392a"
+        },
+        {
+          "upstream_key": "Monitor/d557dfb6-2922-4eee-8fd2-9b57d7117432"
+        },
+        {
+          "upstream_key": "Monitor/d8c90d30-9f08-4cf3-811c-668ed870d9dd"
+        },
+        {
+          "upstream_key": "Monitor/da401973-dc6d-4ba2-bfd0-89575cb60397"
+        },
+        {
+          "upstream_key": "Monitor/dcf68399-80fa-4eea-a216-febfbecd3709"
+        },
+        {
+          "upstream_key": "Monitor/dec183d4-ceb5-4e54-a7b5-c70035cffd2b"
+        },
+        {
+          "upstream_key": "Monitor/dfb1cf1f-a925-4db5-99a3-431f0d500b21"
+        },
+        {
+          "upstream_key": "Monitor/ebaa4a8d-c9df-4058-9e23-b6358e928329"
+        },
+        {
+          "upstream_key": "Monitor/ed232d89-a499-404e-bf53-0264b82afa6c"
+        },
+        {
+          "upstream_key": "Monitor/f0b550b7-ba6d-4e5f-80e4-e6e619dd25ae"
+        },
+        {
+          "upstream_key": "Monitor/f56399ae-971a-43e8-a0d4-90fa9f7f06b3"
+        },
+        {
+          "upstream_key": "Monitor/f8c7d90b-93b5-498f-b18e-b81a44caffc8"
+        },
+        {
+          "upstream_key": "Monitor/fbcac6ae-0c3e-4506-973a-6f6fcdcc66ec"
+        },
+        {
+          "upstream_key": "Monitor/fbf3c925-e11b-48b7-a595-db7f687ade37"
+        }
+      ]
+    },
+    "search": {
+      "filters": {
+        "resolution_width": 2560,
+        "resolution_height": 1440
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/03ee2949-db7b-43e8-b381-838d67c9e0cd"
+        },
+        {
+          "upstream_key": "Monitor/0574e5f9-456d-4499-b8fe-72edec944faf"
+        },
+        {
+          "upstream_key": "Monitor/06fed44d-ae1b-4d4e-91d6-f30245a3701a"
+        },
+        {
+          "upstream_key": "Monitor/0a7688e1-2e73-4335-9c9a-26cc7c6c8e59"
+        },
+        {
+          "upstream_key": "Monitor/0acec31b-de0a-45ca-a1e6-cd5c163b0aeb"
+        },
+        {
+          "upstream_key": "Monitor/159db47d-9866-4707-8099-dfadaaa68ba0"
+        },
+        {
+          "upstream_key": "Monitor/15c30167-49d4-4e72-8219-fc81c55c7164"
+        },
+        {
+          "upstream_key": "Monitor/1b857d40-bb14-41a5-9883-f3cba0fe21aa"
+        },
+        {
+          "upstream_key": "Monitor/1cf7f96a-1a29-403c-b5ed-ce6de10316b7"
+        },
+        {
+          "upstream_key": "Monitor/1f541617-7eb7-452e-82dc-c3ce08af8001"
+        },
+        {
+          "upstream_key": "Monitor/203401b7-9107-4a8c-8dd0-4be45d892dd5"
+        },
+        {
+          "upstream_key": "Monitor/211e53a5-fd87-4a45-ad9f-3f9fc8c8f7a1"
+        },
+        {
+          "upstream_key": "Monitor/22588df4-0373-4aa3-9bb1-69b0fa32e6cd"
+        },
+        {
+          "upstream_key": "Monitor/2459d681-2dcf-48d1-9172-ccd09ef5b551"
+        },
+        {
+          "upstream_key": "Monitor/27e6d909-542d-4dc8-9f3d-0818f604f6fd"
+        },
+        {
+          "upstream_key": "Monitor/27e93de1-91c1-4adf-9888-7918a6a64271"
+        },
+        {
+          "upstream_key": "Monitor/2a280617-f7d0-4678-b1e5-659f07e0c2e4"
+        },
+        {
+          "upstream_key": "Monitor/2d3db9e6-eb45-49e2-ba9b-812fae8c26c5"
+        },
+        {
+          "upstream_key": "Monitor/2e04fee8-e9dc-41b2-9558-0541750ee29a"
+        },
+        {
+          "upstream_key": "Monitor/3332ad73-d801-409e-a863-429272b8a486"
+        },
+        {
+          "upstream_key": "Monitor/364f618a-d949-48fa-8b48-f6c8be79dcfd"
+        },
+        {
+          "upstream_key": "Monitor/3a6742dd-96de-4561-8146-2fbc17d996e2"
+        },
+        {
+          "upstream_key": "Monitor/45799b52-1b5f-4bc0-87d7-396f3217b3db"
+        },
+        {
+          "upstream_key": "Monitor/4878e684-00bd-47de-a77f-0960c387e205"
+        },
+        {
+          "upstream_key": "Monitor/54b1756d-dddc-407c-993e-d26c45a84f99"
+        },
+        {
+          "upstream_key": "Monitor/57c23c7a-b92f-44c3-8b3b-593ee537acd3"
+        },
+        {
+          "upstream_key": "Monitor/5ae0d4ce-cade-41d4-a565-d21d6dbc1f9a"
+        },
+        {
+          "upstream_key": "Monitor/5cc0a1b1-c2e1-4702-adee-85cb230572f2"
+        },
+        {
+          "upstream_key": "Monitor/5d92c2a9-097f-41d3-aee7-26d89c7a5e57"
+        },
+        {
+          "upstream_key": "Monitor/60ae309d-6bb4-4636-86ae-1d1d2459d3ce"
+        },
+        {
+          "upstream_key": "Monitor/672e7079-c899-49c9-9855-ac41a467ebd1"
+        },
+        {
+          "upstream_key": "Monitor/69185473-4c7b-4a5f-ba81-2ebe4150548e"
+        },
+        {
+          "upstream_key": "Monitor/71d531c3-d108-4a2d-a5f4-57c4014c22d7"
+        },
+        {
+          "upstream_key": "Monitor/7b1c121f-ae5e-48d9-a1ae-aa213ec45a22"
+        },
+        {
+          "upstream_key": "Monitor/7edcb2d8-23f2-46e9-9788-b1670df38174"
+        },
+        {
+          "upstream_key": "Monitor/8400456d-5f74-4bca-a6b9-4a4880fd72f9"
+        },
+        {
+          "upstream_key": "Monitor/8c4a2b7a-0734-4282-a978-afa7b372866c"
+        },
+        {
+          "upstream_key": "Monitor/8e2b22af-0ab7-4d6f-b8e5-9d3ab41a5068"
+        },
+        {
+          "upstream_key": "Monitor/90a6c6aa-4192-4d61-ba11-1705ee8d1608"
+        },
+        {
+          "upstream_key": "Monitor/96a07ed6-2425-4da4-8eb2-646f642e78f1"
+        },
+        {
+          "upstream_key": "Monitor/97e9262f-7e29-4bec-b4ee-a00e307f25e8"
+        },
+        {
+          "upstream_key": "Monitor/a0a21475-0207-426c-bc4b-a6b1f9dc9bd8"
+        },
+        {
+          "upstream_key": "Monitor/a1e959c1-993b-4c98-8411-99ce9c0b4b72"
+        },
+        {
+          "upstream_key": "Monitor/a8079620-322d-44fe-abb9-e2ec5acc97da"
+        },
+        {
+          "upstream_key": "Monitor/aa807ada-7c74-4cdb-97cb-2992bb03bfc1"
+        },
+        {
+          "upstream_key": "Monitor/adbf23b2-5ecf-4062-8dc3-325beb2fcf21"
+        },
+        {
+          "upstream_key": "Monitor/adc376af-5b80-45f0-bc03-606ecc502071"
+        },
+        {
+          "upstream_key": "Monitor/b0db29ae-7cd5-4f0c-8641-69ac994fc677"
+        },
+        {
+          "upstream_key": "Monitor/b2be2282-41e4-4fc6-842d-1025625319c5"
+        },
+        {
+          "upstream_key": "Monitor/b7683be9-fafa-483b-b077-99af31be982e"
+        },
+        {
+          "upstream_key": "Monitor/b774bf46-9ebc-464a-a91d-bd8738a788d7"
+        },
+        {
+          "upstream_key": "Monitor/c05d7838-495c-4398-b487-9f39a689f0b1"
+        },
+        {
+          "upstream_key": "Monitor/c62209be-b68a-4799-b5ee-74ffdd1419a9"
+        },
+        {
+          "upstream_key": "Monitor/c82b23fb-c200-45f6-b120-9f5a486fa977"
+        },
+        {
+          "upstream_key": "Monitor/ceed9899-2c02-4d5f-8798-1a6cf540f9d5"
+        },
+        {
+          "upstream_key": "Monitor/cf0cd346-81e4-4da9-9110-891214388ddd"
+        },
+        {
+          "upstream_key": "Monitor/d1462a5f-7705-4a44-969a-1d84a7aa83c1"
+        },
+        {
+          "upstream_key": "Monitor/d185355e-084d-40da-9d10-13c4dc02043b"
+        },
+        {
+          "upstream_key": "Monitor/d4cf9a7b-dfe5-482a-aa5c-2e589a69392a"
+        },
+        {
+          "upstream_key": "Monitor/d557dfb6-2922-4eee-8fd2-9b57d7117432"
+        },
+        {
+          "upstream_key": "Monitor/d8c90d30-9f08-4cf3-811c-668ed870d9dd"
+        },
+        {
+          "upstream_key": "Monitor/da401973-dc6d-4ba2-bfd0-89575cb60397"
+        },
+        {
+          "upstream_key": "Monitor/dcf68399-80fa-4eea-a216-febfbecd3709"
+        },
+        {
+          "upstream_key": "Monitor/dec183d4-ceb5-4e54-a7b5-c70035cffd2b"
+        },
+        {
+          "upstream_key": "Monitor/dfb1cf1f-a925-4db5-99a3-431f0d500b21"
+        },
+        {
+          "upstream_key": "Monitor/ebaa4a8d-c9df-4058-9e23-b6358e928329"
+        },
+        {
+          "upstream_key": "Monitor/ed232d89-a499-404e-bf53-0264b82afa6c"
+        },
+        {
+          "upstream_key": "Monitor/f0b550b7-ba6d-4e5f-80e4-e6e619dd25ae"
+        },
+        {
+          "upstream_key": "Monitor/f56399ae-971a-43e8-a0d4-90fa9f7f06b3"
+        },
+        {
+          "upstream_key": "Monitor/f8c7d90b-93b5-498f-b18e-b81a44caffc8"
+        },
+        {
+          "upstream_key": "Monitor/fbcac6ae-0c3e-4506-973a-6f6fcdcc66ec"
+        },
+        {
+          "upstream_key": "Monitor/fbf3c925-e11b-48b7-a595-db7f687ade37"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bAsus\\b/i, AND explicit search constraints. All 72 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-monitor-11",
+    "category": "monitor",
+    "query": "gigabyte",
+    "class": "range",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/0a9de694-ee65-4b58-8138-fdb708c2ae16"
+        },
+        {
+          "upstream_key": "Monitor/245df665-ee88-4707-8c69-5bf0f1545d53"
+        },
+        {
+          "upstream_key": "Monitor/26bf2133-3339-4a3a-bba6-ba7f18796366"
+        },
+        {
+          "upstream_key": "Monitor/288a393d-c038-47a0-bccc-8112ce61b61e"
+        },
+        {
+          "upstream_key": "Monitor/2bfe1aad-b965-4180-b18b-fcdd96c2f14e"
+        },
+        {
+          "upstream_key": "Monitor/2c54734a-0573-47cf-a24a-73e231ffc8a6"
+        },
+        {
+          "upstream_key": "Monitor/2c9156b8-3bd9-4d33-b4d9-1a341f21fb01"
+        },
+        {
+          "upstream_key": "Monitor/40c79d09-3fd5-466e-89dd-eeab39f3b9a3"
+        },
+        {
+          "upstream_key": "Monitor/47a83480-bcea-4a37-9217-4bd15948f2a3"
+        },
+        {
+          "upstream_key": "Monitor/54bb37aa-50c1-4cef-bb52-e166bab787e6"
+        },
+        {
+          "upstream_key": "Monitor/60d325b7-1e1f-4f01-b900-4f1e05267ed3"
+        },
+        {
+          "upstream_key": "Monitor/6a125c41-0e0c-41d0-b2f3-6015fd5df14f"
+        },
+        {
+          "upstream_key": "Monitor/6c328bec-39a0-4b90-aa64-bf4d5bb6ce85"
+        },
+        {
+          "upstream_key": "Monitor/6e7d718e-e364-4e7f-80d8-955f45f0797c"
+        },
+        {
+          "upstream_key": "Monitor/7247071a-e1fd-42c2-afda-9cea7c10afc6"
+        },
+        {
+          "upstream_key": "Monitor/78ffeffa-6985-4881-99bb-8a172007e275"
+        },
+        {
+          "upstream_key": "Monitor/8c481254-0c3e-40b9-9d72-54fc7243fec5"
+        },
+        {
+          "upstream_key": "Monitor/998f049e-de1a-4daf-a73c-480a4e3b03b0"
+        },
+        {
+          "upstream_key": "Monitor/9fd4b302-aad2-4c6b-9860-c846c2f7b84b"
+        },
+        {
+          "upstream_key": "Monitor/a28801ef-f099-482d-bd59-ff47562d6e12"
+        },
+        {
+          "upstream_key": "Monitor/a328bd63-be21-46b4-a6da-9f7219c43cc7"
+        },
+        {
+          "upstream_key": "Monitor/b42e13f9-3f2d-4ac6-9f58-42172a5d5678"
+        },
+        {
+          "upstream_key": "Monitor/bb7160e4-716a-41fc-ba6f-e26589460882"
+        },
+        {
+          "upstream_key": "Monitor/bdb8dc21-f3fd-42b3-a99f-89a43a5625a3"
+        },
+        {
+          "upstream_key": "Monitor/c1540450-5c3c-4984-a43b-46195997efd2"
+        },
+        {
+          "upstream_key": "Monitor/ca693dc9-4259-489f-abfb-eb9210001cd0"
+        },
+        {
+          "upstream_key": "Monitor/d2d03169-c770-4c5a-97ac-e63a14cc9425"
+        },
+        {
+          "upstream_key": "Monitor/d4711ec3-4b9a-4167-997e-f7f1931c1355"
+        },
+        {
+          "upstream_key": "Monitor/d5fb4f1c-e288-4c43-be83-e7dbc6252bf5"
+        },
+        {
+          "upstream_key": "Monitor/e3d92a54-4c12-4d49-a114-f44908e9d9d8"
+        },
+        {
+          "upstream_key": "Monitor/eb2d4656-7e3a-4744-9f33-cf7d4acbc4b6"
+        },
+        {
+          "upstream_key": "Monitor/f8a508ce-7090-492b-b53b-76b07b0fa2c9"
+        },
+        {
+          "upstream_key": "Monitor/ff2981df-f4f0-41c9-b6ff-801ea4175c02"
+        }
+      ]
+    },
+    "search": {
+      "ranges": {
+        "refresh_rate_hz": {
+          "min": 170
+        }
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/0a9de694-ee65-4b58-8138-fdb708c2ae16"
+        },
+        {
+          "upstream_key": "Monitor/245df665-ee88-4707-8c69-5bf0f1545d53"
+        },
+        {
+          "upstream_key": "Monitor/26bf2133-3339-4a3a-bba6-ba7f18796366"
+        },
+        {
+          "upstream_key": "Monitor/288a393d-c038-47a0-bccc-8112ce61b61e"
+        },
+        {
+          "upstream_key": "Monitor/2bfe1aad-b965-4180-b18b-fcdd96c2f14e"
+        },
+        {
+          "upstream_key": "Monitor/2c54734a-0573-47cf-a24a-73e231ffc8a6"
+        },
+        {
+          "upstream_key": "Monitor/2c9156b8-3bd9-4d33-b4d9-1a341f21fb01"
+        },
+        {
+          "upstream_key": "Monitor/40c79d09-3fd5-466e-89dd-eeab39f3b9a3"
+        },
+        {
+          "upstream_key": "Monitor/47a83480-bcea-4a37-9217-4bd15948f2a3"
+        },
+        {
+          "upstream_key": "Monitor/54bb37aa-50c1-4cef-bb52-e166bab787e6"
+        },
+        {
+          "upstream_key": "Monitor/60d325b7-1e1f-4f01-b900-4f1e05267ed3"
+        },
+        {
+          "upstream_key": "Monitor/6a125c41-0e0c-41d0-b2f3-6015fd5df14f"
+        },
+        {
+          "upstream_key": "Monitor/6c328bec-39a0-4b90-aa64-bf4d5bb6ce85"
+        },
+        {
+          "upstream_key": "Monitor/6e7d718e-e364-4e7f-80d8-955f45f0797c"
+        },
+        {
+          "upstream_key": "Monitor/7247071a-e1fd-42c2-afda-9cea7c10afc6"
+        },
+        {
+          "upstream_key": "Monitor/78ffeffa-6985-4881-99bb-8a172007e275"
+        },
+        {
+          "upstream_key": "Monitor/8c481254-0c3e-40b9-9d72-54fc7243fec5"
+        },
+        {
+          "upstream_key": "Monitor/998f049e-de1a-4daf-a73c-480a4e3b03b0"
+        },
+        {
+          "upstream_key": "Monitor/9fd4b302-aad2-4c6b-9860-c846c2f7b84b"
+        },
+        {
+          "upstream_key": "Monitor/a28801ef-f099-482d-bd59-ff47562d6e12"
+        },
+        {
+          "upstream_key": "Monitor/a328bd63-be21-46b4-a6da-9f7219c43cc7"
+        },
+        {
+          "upstream_key": "Monitor/b42e13f9-3f2d-4ac6-9f58-42172a5d5678"
+        },
+        {
+          "upstream_key": "Monitor/bb7160e4-716a-41fc-ba6f-e26589460882"
+        },
+        {
+          "upstream_key": "Monitor/bdb8dc21-f3fd-42b3-a99f-89a43a5625a3"
+        },
+        {
+          "upstream_key": "Monitor/c1540450-5c3c-4984-a43b-46195997efd2"
+        },
+        {
+          "upstream_key": "Monitor/ca693dc9-4259-489f-abfb-eb9210001cd0"
+        },
+        {
+          "upstream_key": "Monitor/d2d03169-c770-4c5a-97ac-e63a14cc9425"
+        },
+        {
+          "upstream_key": "Monitor/d4711ec3-4b9a-4167-997e-f7f1931c1355"
+        },
+        {
+          "upstream_key": "Monitor/d5fb4f1c-e288-4c43-be83-e7dbc6252bf5"
+        },
+        {
+          "upstream_key": "Monitor/e3d92a54-4c12-4d49-a114-f44908e9d9d8"
+        },
+        {
+          "upstream_key": "Monitor/eb2d4656-7e3a-4744-9f33-cf7d4acbc4b6"
+        },
+        {
+          "upstream_key": "Monitor/f8a508ce-7090-492b-b53b-76b07b0fa2c9"
+        },
+        {
+          "upstream_key": "Monitor/ff2981df-f4f0-41c9-b6ff-801ea4175c02"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bGigabyte\\b/i, AND explicit search constraints. All 33 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-monitor-12",
+    "category": "monitor",
+    "query": "monitor",
+    "class": "facet",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/009d3d7c-7358-47f7-8dee-63d132521b38"
+        },
+        {
+          "upstream_key": "Monitor/0dda92b3-ced7-4428-9137-8175e15d759d"
+        },
+        {
+          "upstream_key": "Monitor/16a9de07-2b6d-4f2d-9c2e-ee0e66d1ef8e"
+        },
+        {
+          "upstream_key": "Monitor/1b857d40-bb14-41a5-9883-f3cba0fe21aa"
+        },
+        {
+          "upstream_key": "Monitor/2c08eb0e-8036-4d6f-a98e-b8729d854fa1"
+        },
+        {
+          "upstream_key": "Monitor/3156f315-ad86-4fc6-8695-9af832e6a9b5"
+        },
+        {
+          "upstream_key": "Monitor/4289f38e-1461-47f6-8897-5d19c26c2e01"
+        },
+        {
+          "upstream_key": "Monitor/493b1730-3abb-4fa4-b44a-ab190eb7a7cd"
+        },
+        {
+          "upstream_key": "Monitor/51a479e1-861e-45a5-b794-fa02eb505559"
+        },
+        {
+          "upstream_key": "Monitor/55cf6019-5986-40bf-9661-87404c9e76f5"
+        },
+        {
+          "upstream_key": "Monitor/5f2e8603-d50f-4722-b11e-39c04c263b79"
+        },
+        {
+          "upstream_key": "Monitor/6a28c01e-5b44-4561-9ac5-11dec04b8c0e"
+        },
+        {
+          "upstream_key": "Monitor/73a22c43-b048-422a-9561-c53071c9943d"
+        },
+        {
+          "upstream_key": "Monitor/7b1c121f-ae5e-48d9-a1ae-aa213ec45a22"
+        },
+        {
+          "upstream_key": "Monitor/7ef2eb00-ca63-4146-90c9-3c4820c078ff"
+        },
+        {
+          "upstream_key": "Monitor/8ada8d34-2c84-4659-9150-6c4625eeb57d"
+        },
+        {
+          "upstream_key": "Monitor/8b2f62e0-4958-45c0-b851-132c88f86d2d"
+        },
+        {
+          "upstream_key": "Monitor/8e2b22af-0ab7-4d6f-b8e5-9d3ab41a5068"
+        },
+        {
+          "upstream_key": "Monitor/95dbe6f2-8c9e-45fa-92c3-662b15bd0283"
+        },
+        {
+          "upstream_key": "Monitor/a6a492e1-92c6-4fa0-aa26-ae69a1bb2e2b"
+        },
+        {
+          "upstream_key": "Monitor/a9487696-37f0-467d-94a3-6ad765e8b13a"
+        },
+        {
+          "upstream_key": "Monitor/b10b9a84-4ff0-4a4c-8e7c-616aded3eb4c"
+        },
+        {
+          "upstream_key": "Monitor/c5dfbc1b-0077-40c4-a38f-ea30cf225837"
+        },
+        {
+          "upstream_key": "Monitor/c79bfc1e-ecb6-4769-8bee-f42a554d8a4c"
+        },
+        {
+          "upstream_key": "Monitor/cbb8adb5-52bf-4a05-8c20-cd9aaf7f573e"
+        },
+        {
+          "upstream_key": "Monitor/f661028d-9a9f-4c2d-90a6-b1ca5db8f60d"
+        },
+        {
+          "upstream_key": "Monitor/fbcac6ae-0c3e-4506-973a-6f6fcdcc66ec"
+        }
+      ]
+    },
+    "search": {
+      "facets": {
+        "ports": "displayport_1_4a"
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Monitor/009d3d7c-7358-47f7-8dee-63d132521b38"
+        },
+        {
+          "upstream_key": "Monitor/0dda92b3-ced7-4428-9137-8175e15d759d"
+        },
+        {
+          "upstream_key": "Monitor/16a9de07-2b6d-4f2d-9c2e-ee0e66d1ef8e"
+        },
+        {
+          "upstream_key": "Monitor/1b857d40-bb14-41a5-9883-f3cba0fe21aa"
+        },
+        {
+          "upstream_key": "Monitor/2c08eb0e-8036-4d6f-a98e-b8729d854fa1"
+        },
+        {
+          "upstream_key": "Monitor/3156f315-ad86-4fc6-8695-9af832e6a9b5"
+        },
+        {
+          "upstream_key": "Monitor/4289f38e-1461-47f6-8897-5d19c26c2e01"
+        },
+        {
+          "upstream_key": "Monitor/493b1730-3abb-4fa4-b44a-ab190eb7a7cd"
+        },
+        {
+          "upstream_key": "Monitor/51a479e1-861e-45a5-b794-fa02eb505559"
+        },
+        {
+          "upstream_key": "Monitor/55cf6019-5986-40bf-9661-87404c9e76f5"
+        },
+        {
+          "upstream_key": "Monitor/5f2e8603-d50f-4722-b11e-39c04c263b79"
+        },
+        {
+          "upstream_key": "Monitor/6a28c01e-5b44-4561-9ac5-11dec04b8c0e"
+        },
+        {
+          "upstream_key": "Monitor/73a22c43-b048-422a-9561-c53071c9943d"
+        },
+        {
+          "upstream_key": "Monitor/7b1c121f-ae5e-48d9-a1ae-aa213ec45a22"
+        },
+        {
+          "upstream_key": "Monitor/7ef2eb00-ca63-4146-90c9-3c4820c078ff"
+        },
+        {
+          "upstream_key": "Monitor/8ada8d34-2c84-4659-9150-6c4625eeb57d"
+        },
+        {
+          "upstream_key": "Monitor/8b2f62e0-4958-45c0-b851-132c88f86d2d"
+        },
+        {
+          "upstream_key": "Monitor/8e2b22af-0ab7-4d6f-b8e5-9d3ab41a5068"
+        },
+        {
+          "upstream_key": "Monitor/95dbe6f2-8c9e-45fa-92c3-662b15bd0283"
+        },
+        {
+          "upstream_key": "Monitor/a6a492e1-92c6-4fa0-aa26-ae69a1bb2e2b"
+        },
+        {
+          "upstream_key": "Monitor/a9487696-37f0-467d-94a3-6ad765e8b13a"
+        },
+        {
+          "upstream_key": "Monitor/b10b9a84-4ff0-4a4c-8e7c-616aded3eb4c"
+        },
+        {
+          "upstream_key": "Monitor/c5dfbc1b-0077-40c4-a38f-ea30cf225837"
+        },
+        {
+          "upstream_key": "Monitor/c79bfc1e-ecb6-4769-8bee-f42a554d8a4c"
+        },
+        {
+          "upstream_key": "Monitor/cbb8adb5-52bf-4a05-8c20-cd9aaf7f573e"
+        },
+        {
+          "upstream_key": "Monitor/f661028d-9a9f-4c2d-90a6-b1ca5db8f60d"
+        },
+        {
+          "upstream_key": "Monitor/fbcac6ae-0c3e-4506-973a-6f6fcdcc66ec"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bMonitor\\b/i, AND explicit search constraints. All 27 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-headphones-01",
+    "category": "headphones",
+    "query": "Beyerdynamic DT 990 Pro 250 Open-Back Wired Headphones",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/eb851535-44b4-417f-bbba-5a0966e0c691"
+    }
+  },
+  {
+    "id": "ext-headphones-02",
+    "category": "headphones",
+    "query": "Beyerdynamic DT 990 Pro 250",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/eb851535-44b4-417f-bbba-5a0966e0c691"
+    }
+  },
+  {
+    "id": "ext-headphones-03",
+    "category": "headphones",
+    "query": "DT990",
+    "class": "compact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/eb851535-44b4-417f-bbba-5a0966e0c691"
+    }
+  },
+  {
+    "id": "ext-headphones-04",
+    "category": "headphones",
+    "query": "HyperX Cloud III S Wireless Black Red",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+    }
+  },
+  {
+    "id": "ext-headphones-05",
+    "category": "headphones",
+    "query": "HyperX Cloud III S Wireless White",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/c5e81f3b-ac78-43c1-91ca-141f01805406"
+    }
+  },
+  {
+    "id": "ext-headphones-06",
+    "category": "headphones",
+    "query": "Creative Sound Blaster JAM V2",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/8e3b6893-69ca-40b8-ab6f-a1af8cd3e695"
+    }
+  },
+  {
+    "id": "ext-headphones-07",
+    "category": "headphones",
+    "query": "AMS-DT-990-PRO-250                                                    DT-990-PRO-250",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/eb851535-44b4-417f-bbba-5a0966e0c691"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "AMS-DT-990-PRO-250                                                    DT-990-PRO-250"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-headphones-08",
+    "category": "headphones",
+    "query": "A59Z0AA",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "A59Z0AA"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-headphones-09",
+    "category": "headphones",
+    "query": "dt 990",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/071874ff-9dfd-4b9d-aa03-dd2da552e42c"
+        },
+        {
+          "upstream_key": "Headphones/d424bcd5-ff2e-413d-b780-5e7422fc52e1"
+        },
+        {
+          "upstream_key": "Headphones/d9b96877-d084-4bc5-8ae2-64b0f335b0f1"
+        },
+        {
+          "upstream_key": "Headphones/eb851535-44b4-417f-bbba-5a0966e0c691"
+        },
+        {
+          "upstream_key": "Headphones/f1699aa1-121a-4426-9cdd-8463784991d7"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/071874ff-9dfd-4b9d-aa03-dd2da552e42c"
+        },
+        {
+          "upstream_key": "Headphones/d424bcd5-ff2e-413d-b780-5e7422fc52e1"
+        },
+        {
+          "upstream_key": "Headphones/d9b96877-d084-4bc5-8ae2-64b0f335b0f1"
+        },
+        {
+          "upstream_key": "Headphones/eb851535-44b4-417f-bbba-5a0966e0c691"
+        },
+        {
+          "upstream_key": "Headphones/f1699aa1-121a-4426-9cdd-8463784991d7"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bDT 990\\b/i, AND explicit search constraints. All 5 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-headphones-10",
+    "category": "headphones",
+    "query": "hyperx",
+    "class": "typed_spec",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/135ab3d2-1b70-42bc-9d02-01234a0b5322"
+        },
+        {
+          "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+        },
+        {
+          "upstream_key": "Headphones/3f3b4ccc-5d9c-447a-861a-083b4ae0b615"
+        },
+        {
+          "upstream_key": "Headphones/4dc19c0e-ab47-4e4a-bdd8-cca0f341af8f"
+        },
+        {
+          "upstream_key": "Headphones/4e0926aa-1d74-4b45-8057-727254608498"
+        },
+        {
+          "upstream_key": "Headphones/5c37c100-2475-4642-bb1c-e31d3d0e7462"
+        },
+        {
+          "upstream_key": "Headphones/7d92d2f6-305c-4697-a472-52d8e91492bf"
+        },
+        {
+          "upstream_key": "Headphones/8758df42-1347-4edb-9a59-4168b78a162a"
+        },
+        {
+          "upstream_key": "Headphones/8c4e529f-7cc7-43ed-9fd6-2c629d26ac16"
+        },
+        {
+          "upstream_key": "Headphones/98726d19-c1c6-4d89-b01a-c9ad4e0895d8"
+        },
+        {
+          "upstream_key": "Headphones/9f88d2be-464c-409d-975a-f0d70ac8400d"
+        },
+        {
+          "upstream_key": "Headphones/c5e81f3b-ac78-43c1-91ca-141f01805406"
+        },
+        {
+          "upstream_key": "Headphones/f8d4896a-8881-41e9-8c43-9f3a12eba9e6"
+        }
+      ]
+    },
+    "search": {
+      "filters": {
+        "headphone_type": "Closed-Back"
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/135ab3d2-1b70-42bc-9d02-01234a0b5322"
+        },
+        {
+          "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+        },
+        {
+          "upstream_key": "Headphones/3f3b4ccc-5d9c-447a-861a-083b4ae0b615"
+        },
+        {
+          "upstream_key": "Headphones/4dc19c0e-ab47-4e4a-bdd8-cca0f341af8f"
+        },
+        {
+          "upstream_key": "Headphones/4e0926aa-1d74-4b45-8057-727254608498"
+        },
+        {
+          "upstream_key": "Headphones/5c37c100-2475-4642-bb1c-e31d3d0e7462"
+        },
+        {
+          "upstream_key": "Headphones/7d92d2f6-305c-4697-a472-52d8e91492bf"
+        },
+        {
+          "upstream_key": "Headphones/8758df42-1347-4edb-9a59-4168b78a162a"
+        },
+        {
+          "upstream_key": "Headphones/8c4e529f-7cc7-43ed-9fd6-2c629d26ac16"
+        },
+        {
+          "upstream_key": "Headphones/98726d19-c1c6-4d89-b01a-c9ad4e0895d8"
+        },
+        {
+          "upstream_key": "Headphones/9f88d2be-464c-409d-975a-f0d70ac8400d"
+        },
+        {
+          "upstream_key": "Headphones/c5e81f3b-ac78-43c1-91ca-141f01805406"
+        },
+        {
+          "upstream_key": "Headphones/f8d4896a-8881-41e9-8c43-9f3a12eba9e6"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bHyperX\\b/i, AND explicit search constraints. All 13 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-headphones-11",
+    "category": "headphones",
+    "query": "hyperx",
+    "class": "facet",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+        },
+        {
+          "upstream_key": "Headphones/3f3b4ccc-5d9c-447a-861a-083b4ae0b615"
+        },
+        {
+          "upstream_key": "Headphones/4dc19c0e-ab47-4e4a-bdd8-cca0f341af8f"
+        },
+        {
+          "upstream_key": "Headphones/8c4e529f-7cc7-43ed-9fd6-2c629d26ac16"
+        },
+        {
+          "upstream_key": "Headphones/9f88d2be-464c-409d-975a-f0d70ac8400d"
+        },
+        {
+          "upstream_key": "Headphones/c5e81f3b-ac78-43c1-91ca-141f01805406"
+        }
+      ]
+    },
+    "search": {
+      "facets": {
+        "connection_types": "Wireless 2.4GHz"
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+        },
+        {
+          "upstream_key": "Headphones/3f3b4ccc-5d9c-447a-861a-083b4ae0b615"
+        },
+        {
+          "upstream_key": "Headphones/4dc19c0e-ab47-4e4a-bdd8-cca0f341af8f"
+        },
+        {
+          "upstream_key": "Headphones/8c4e529f-7cc7-43ed-9fd6-2c629d26ac16"
+        },
+        {
+          "upstream_key": "Headphones/9f88d2be-464c-409d-975a-f0d70ac8400d"
+        },
+        {
+          "upstream_key": "Headphones/c5e81f3b-ac78-43c1-91ca-141f01805406"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bHyperX\\b/i, AND explicit search constraints. All 6 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-headphones-12",
+    "category": "headphones",
+    "query": "hyperx",
+    "class": "range",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/135ab3d2-1b70-42bc-9d02-01234a0b5322"
+        },
+        {
+          "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+        },
+        {
+          "upstream_key": "Headphones/3f3b4ccc-5d9c-447a-861a-083b4ae0b615"
+        },
+        {
+          "upstream_key": "Headphones/4dc19c0e-ab47-4e4a-bdd8-cca0f341af8f"
+        },
+        {
+          "upstream_key": "Headphones/4e0926aa-1d74-4b45-8057-727254608498"
+        },
+        {
+          "upstream_key": "Headphones/5c37c100-2475-4642-bb1c-e31d3d0e7462"
+        },
+        {
+          "upstream_key": "Headphones/7d92d2f6-305c-4697-a472-52d8e91492bf"
+        },
+        {
+          "upstream_key": "Headphones/8758df42-1347-4edb-9a59-4168b78a162a"
+        },
+        {
+          "upstream_key": "Headphones/8c4e529f-7cc7-43ed-9fd6-2c629d26ac16"
+        },
+        {
+          "upstream_key": "Headphones/98726d19-c1c6-4d89-b01a-c9ad4e0895d8"
+        },
+        {
+          "upstream_key": "Headphones/9f88d2be-464c-409d-975a-f0d70ac8400d"
+        },
+        {
+          "upstream_key": "Headphones/c5e81f3b-ac78-43c1-91ca-141f01805406"
+        },
+        {
+          "upstream_key": "Headphones/f8d4896a-8881-41e9-8c43-9f3a12eba9e6"
+        }
+      ]
+    },
+    "search": {
+      "ranges": {
+        "weight_g": {
+          "max": 400
+        }
+      }
+    },
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Headphones/135ab3d2-1b70-42bc-9d02-01234a0b5322"
+        },
+        {
+          "upstream_key": "Headphones/30148a55-a1c7-47fc-a0d6-4fad5a36c682"
+        },
+        {
+          "upstream_key": "Headphones/3f3b4ccc-5d9c-447a-861a-083b4ae0b615"
+        },
+        {
+          "upstream_key": "Headphones/4dc19c0e-ab47-4e4a-bdd8-cca0f341af8f"
+        },
+        {
+          "upstream_key": "Headphones/4e0926aa-1d74-4b45-8057-727254608498"
+        },
+        {
+          "upstream_key": "Headphones/5c37c100-2475-4642-bb1c-e31d3d0e7462"
+        },
+        {
+          "upstream_key": "Headphones/7d92d2f6-305c-4697-a472-52d8e91492bf"
+        },
+        {
+          "upstream_key": "Headphones/8758df42-1347-4edb-9a59-4168b78a162a"
+        },
+        {
+          "upstream_key": "Headphones/8c4e529f-7cc7-43ed-9fd6-2c629d26ac16"
+        },
+        {
+          "upstream_key": "Headphones/98726d19-c1c6-4d89-b01a-c9ad4e0895d8"
+        },
+        {
+          "upstream_key": "Headphones/9f88d2be-464c-409d-975a-f0d70ac8400d"
+        },
+        {
+          "upstream_key": "Headphones/c5e81f3b-ac78-43c1-91ca-141f01805406"
+        },
+        {
+          "upstream_key": "Headphones/f8d4896a-8881-41e9-8c43-9f3a12eba9e6"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bHyperX\\b/i, AND explicit search constraints. All 13 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-capture_card-01",
+    "category": "capture_card",
+    "query": "Elgato 4K60 Pro MK.2",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "CaptureCard/8073870e-71bd-45a6-ba71-825dbe1cfa2d"
+    }
+  },
+  {
+    "id": "ext-capture_card-02",
+    "category": "capture_card",
+    "query": "Elgato HD60 S+",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "CaptureCard/0dddfe03-fe17-4d5a-9d53-5ec7521458e1"
+    }
+  },
+  {
+    "id": "ext-capture_card-03",
+    "category": "capture_card",
+    "query": "10GAS9901",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "CaptureCard/8073870e-71bd-45a6-ba71-825dbe1cfa2d"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "10GAS9901"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-capture_card-04",
+    "category": "capture_card",
+    "query": "Elgato 4K60 Pro MK.2",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "CaptureCard/8073870e-71bd-45a6-ba71-825dbe1cfa2d"
+    }
+  },
+  {
+    "id": "ext-capture_card-05",
+    "category": "capture_card",
+    "query": "Elgato",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "CaptureCard/0dddfe03-fe17-4d5a-9d53-5ec7521458e1"
+        },
+        {
+          "upstream_key": "CaptureCard/24805ee4-357b-4482-9d2d-44cd607e6833"
+        },
+        {
+          "upstream_key": "CaptureCard/5a3afce3-0cde-459e-b66f-cd97d8eeb760"
+        },
+        {
+          "upstream_key": "CaptureCard/8073870e-71bd-45a6-ba71-825dbe1cfa2d"
+        },
+        {
+          "upstream_key": "CaptureCard/953bac7c-a985-4ecf-834d-d35031fae211"
+        },
+        {
+          "upstream_key": "CaptureCard/e510364f-3d76-462b-ac86-96fdb0ee1c6d"
+        },
+        {
+          "upstream_key": "CaptureCard/e9cccc62-9050-47cd-abc7-d1c0e1f1a72e"
+        },
+        {
+          "upstream_key": "CaptureCard/ec14560c-1150-446a-8300-647c675ac3fc"
+        },
+        {
+          "upstream_key": "CaptureCard/edc51a30-b602-4f07-b0bd-0864f6a70c05"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "CaptureCard/0dddfe03-fe17-4d5a-9d53-5ec7521458e1"
+        },
+        {
+          "upstream_key": "CaptureCard/24805ee4-357b-4482-9d2d-44cd607e6833"
+        },
+        {
+          "upstream_key": "CaptureCard/5a3afce3-0cde-459e-b66f-cd97d8eeb760"
+        },
+        {
+          "upstream_key": "CaptureCard/8073870e-71bd-45a6-ba71-825dbe1cfa2d"
+        },
+        {
+          "upstream_key": "CaptureCard/953bac7c-a985-4ecf-834d-d35031fae211"
+        },
+        {
+          "upstream_key": "CaptureCard/e510364f-3d76-462b-ac86-96fdb0ee1c6d"
+        },
+        {
+          "upstream_key": "CaptureCard/e9cccc62-9050-47cd-abc7-d1c0e1f1a72e"
+        },
+        {
+          "upstream_key": "CaptureCard/ec14560c-1150-446a-8300-647c675ac3fc"
+        },
+        {
+          "upstream_key": "CaptureCard/edc51a30-b602-4f07-b0bd-0864f6a70c05"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bElgato\\b/i, AND explicit search constraints. All 9 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-microphone-01",
+    "category": "microphone",
+    "query": "Shure SM7B",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Microphone/af9f6585-24d3-48c6-94aa-a96023412558"
+    }
+  },
+  {
+    "id": "ext-microphone-02",
+    "category": "microphone",
+    "query": "HyperX QuadCast 2 S USB-C Microphone Black",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Microphone/be2e37f7-f6f2-4643-9d23-282b8d3a0e12"
+    }
+  },
+  {
+    "id": "ext-microphone-03",
+    "category": "microphone",
+    "query": "sm7b",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Microphone/af9f6585-24d3-48c6-94aa-a96023412558"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "sm7b"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-microphone-04",
+    "category": "microphone",
+    "query": "Shure SM7B Dynamic Studio Microphone",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Microphone/af9f6585-24d3-48c6-94aa-a96023412558"
+    }
+  },
+  {
+    "id": "ext-microphone-05",
+    "category": "microphone",
+    "query": "yeti",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Microphone/120335ba-efa5-4c02-a806-0af0b9485a69"
+        },
+        {
+          "upstream_key": "Microphone/1caba9e5-8db0-417b-bc6a-279503e93712"
+        },
+        {
+          "upstream_key": "Microphone/3ff3ecfb-acde-47ff-98fd-ecc610a49f0f"
+        },
+        {
+          "upstream_key": "Microphone/4b300b84-cebe-4a1d-93ad-783deec87e22"
+        },
+        {
+          "upstream_key": "Microphone/a97115d5-d4a2-4a6d-8efe-b8aa3fdda887"
+        },
+        {
+          "upstream_key": "Microphone/c667d0e3-f9ff-4a11-adfb-80f3faf828fa"
+        },
+        {
+          "upstream_key": "Microphone/db7475d4-fa80-44e5-86a5-1a1a4b48f1d8"
+        },
+        {
+          "upstream_key": "Microphone/e08c9adc-32f0-4f98-b500-7227a185ce41"
+        },
+        {
+          "upstream_key": "Microphone/e8035ac0-d58e-4e63-83f9-d365ad3dc5e0"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Microphone/120335ba-efa5-4c02-a806-0af0b9485a69"
+        },
+        {
+          "upstream_key": "Microphone/1caba9e5-8db0-417b-bc6a-279503e93712"
+        },
+        {
+          "upstream_key": "Microphone/3ff3ecfb-acde-47ff-98fd-ecc610a49f0f"
+        },
+        {
+          "upstream_key": "Microphone/4b300b84-cebe-4a1d-93ad-783deec87e22"
+        },
+        {
+          "upstream_key": "Microphone/a97115d5-d4a2-4a6d-8efe-b8aa3fdda887"
+        },
+        {
+          "upstream_key": "Microphone/c667d0e3-f9ff-4a11-adfb-80f3faf828fa"
+        },
+        {
+          "upstream_key": "Microphone/db7475d4-fa80-44e5-86a5-1a1a4b48f1d8"
+        },
+        {
+          "upstream_key": "Microphone/e08c9adc-32f0-4f98-b500-7227a185ce41"
+        },
+        {
+          "upstream_key": "Microphone/e8035ac0-d58e-4e63-83f9-d365ad3dc5e0"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bYeti\\b/i, AND explicit search constraints. All 9 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-webcam-01",
+    "category": "webcam",
+    "query": "Logitech C920 HD Pro Webcam",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Webcam/a9550bce-54e6-45c0-8272-dcec5a6a0313"
+    }
+  },
+  {
+    "id": "ext-webcam-02",
+    "category": "webcam",
+    "query": "Elgato Facecam MK.2",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Webcam/eb1ad3e3-a854-42ac-816b-c487f94537e6"
+    }
+  },
+  {
+    "id": "ext-webcam-03",
+    "category": "webcam",
+    "query": "960-000764",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Webcam/a9550bce-54e6-45c0-8272-dcec5a6a0313"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "960-000764"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-webcam-04",
+    "category": "webcam",
+    "query": "Logitech C920 HD Pro Webcam",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Webcam/a9550bce-54e6-45c0-8272-dcec5a6a0313"
+    }
+  },
+  {
+    "id": "ext-webcam-05",
+    "category": "webcam",
+    "query": "facecam",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Webcam/3e031a4f-e498-4413-9b52-0908c5cd9a5d"
+        },
+        {
+          "upstream_key": "Webcam/3f7ebc52-4aa3-4161-8fcf-adcdec8f9628"
+        },
+        {
+          "upstream_key": "Webcam/50e0c358-aff7-4588-8cb3-05e133cba14c"
+        },
+        {
+          "upstream_key": "Webcam/5c3339a5-5ab2-42c4-bd31-c779b42e44e5"
+        },
+        {
+          "upstream_key": "Webcam/a8ac9f67-bbc9-4b04-ac52-20d7a018685e"
+        },
+        {
+          "upstream_key": "Webcam/b7a1924d-9c75-49e6-9684-f66329db6b92"
+        },
+        {
+          "upstream_key": "Webcam/eb1ad3e3-a854-42ac-816b-c487f94537e6"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Webcam/3e031a4f-e498-4413-9b52-0908c5cd9a5d"
+        },
+        {
+          "upstream_key": "Webcam/3f7ebc52-4aa3-4161-8fcf-adcdec8f9628"
+        },
+        {
+          "upstream_key": "Webcam/50e0c358-aff7-4588-8cb3-05e133cba14c"
+        },
+        {
+          "upstream_key": "Webcam/5c3339a5-5ab2-42c4-bd31-c779b42e44e5"
+        },
+        {
+          "upstream_key": "Webcam/a8ac9f67-bbc9-4b04-ac52-20d7a018685e"
+        },
+        {
+          "upstream_key": "Webcam/b7a1924d-9c75-49e6-9684-f66329db6b92"
+        },
+        {
+          "upstream_key": "Webcam/eb1ad3e3-a854-42ac-816b-c487f94537e6"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bFacecam\\b/i, AND explicit search constraints. All 7 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-speaker-01",
+    "category": "speaker",
+    "query": "Creative Labs Pebble V3",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Speaker/ccac0ba6-be47-49e4-91da-42bc76a62bed"
+    }
+  },
+  {
+    "id": "ext-speaker-02",
+    "category": "speaker",
+    "query": "Edifier R1280DB Black",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Speaker/4ee0327d-be59-4781-ae51-3015b6d5abd2"
+    }
+  },
+  {
+    "id": "ext-speaker-03",
+    "category": "speaker",
+    "query": "51MF1700AA003",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Speaker/ccac0ba6-be47-49e4-91da-42bc76a62bed"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "51MF1700AA003"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-speaker-04",
+    "category": "speaker",
+    "query": "Creative Labs Pebble V3 2.0 16 W Speakers",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Speaker/ccac0ba6-be47-49e4-91da-42bc76a62bed"
+    }
+  },
+  {
+    "id": "ext-speaker-05",
+    "category": "speaker",
+    "query": "pebble",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "Speaker/14fd0e45-1619-48c7-8a35-68fb07806a1d"
+        },
+        {
+          "upstream_key": "Speaker/358bad76-fce1-4455-8341-a8ac722cb741"
+        },
+        {
+          "upstream_key": "Speaker/44b07085-36d0-485b-a7d1-151e5cfa0375"
+        },
+        {
+          "upstream_key": "Speaker/6653f4e2-3841-497a-ae03-363129069324"
+        },
+        {
+          "upstream_key": "Speaker/7093432f-e062-4112-bc04-022eed4b5619"
+        },
+        {
+          "upstream_key": "Speaker/94ab6e6c-e227-498c-ac8e-a319cf508ea1"
+        },
+        {
+          "upstream_key": "Speaker/9e7eb6f1-415f-4aa7-ae01-602f612e14cc"
+        },
+        {
+          "upstream_key": "Speaker/be549efa-f22c-4b52-81ed-007dd024cf2a"
+        },
+        {
+          "upstream_key": "Speaker/c6fba417-5049-4dc0-9d4d-b12f70fc452a"
+        },
+        {
+          "upstream_key": "Speaker/c92c5780-6de2-4de2-96c1-ce904f0803d9"
+        },
+        {
+          "upstream_key": "Speaker/ccac0ba6-be47-49e4-91da-42bc76a62bed"
+        },
+        {
+          "upstream_key": "Speaker/d0bbb38a-ae41-4aba-a38c-965d246c1a82"
+        },
+        {
+          "upstream_key": "Speaker/e0b2103f-5b09-4c01-8c64-d32dae275ab2"
+        },
+        {
+          "upstream_key": "Speaker/fec3dc02-9aa1-4858-ac09-85ea9ebe1da7"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "Speaker/14fd0e45-1619-48c7-8a35-68fb07806a1d"
+        },
+        {
+          "upstream_key": "Speaker/358bad76-fce1-4455-8341-a8ac722cb741"
+        },
+        {
+          "upstream_key": "Speaker/44b07085-36d0-485b-a7d1-151e5cfa0375"
+        },
+        {
+          "upstream_key": "Speaker/6653f4e2-3841-497a-ae03-363129069324"
+        },
+        {
+          "upstream_key": "Speaker/7093432f-e062-4112-bc04-022eed4b5619"
+        },
+        {
+          "upstream_key": "Speaker/94ab6e6c-e227-498c-ac8e-a319cf508ea1"
+        },
+        {
+          "upstream_key": "Speaker/9e7eb6f1-415f-4aa7-ae01-602f612e14cc"
+        },
+        {
+          "upstream_key": "Speaker/be549efa-f22c-4b52-81ed-007dd024cf2a"
+        },
+        {
+          "upstream_key": "Speaker/c6fba417-5049-4dc0-9d4d-b12f70fc452a"
+        },
+        {
+          "upstream_key": "Speaker/c92c5780-6de2-4de2-96c1-ce904f0803d9"
+        },
+        {
+          "upstream_key": "Speaker/ccac0ba6-be47-49e4-91da-42bc76a62bed"
+        },
+        {
+          "upstream_key": "Speaker/d0bbb38a-ae41-4aba-a38c-965d246c1a82"
+        },
+        {
+          "upstream_key": "Speaker/e0b2103f-5b09-4c01-8c64-d32dae275ab2"
+        },
+        {
+          "upstream_key": "Speaker/fec3dc02-9aa1-4858-ac09-85ea9ebe1da7"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bPebble\\b/i, AND explicit search constraints. All 14 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-sound_card-01",
+    "category": "sound_card",
+    "query": "Creative Sound Blaster AE-7",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "SoundCard/bbac81cf-5031-4f2c-b4bd-61db24ccd0e0"
+    }
+  },
+  {
+    "id": "ext-sound_card-02",
+    "category": "sound_card",
+    "query": "Sound Blaster Audigy Fx V2",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "SoundCard/a54d739f-4101-41f5-a797-6b294178825a"
+    }
+  },
+  {
+    "id": "ext-sound_card-03",
+    "category": "sound_card",
+    "query": "70SB180000000",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "SoundCard/bbac81cf-5031-4f2c-b4bd-61db24ccd0e0"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "70SB180000000"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-sound_card-04",
+    "category": "sound_card",
+    "query": "Creative Labs Sound Blaster AE-7",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "SoundCard/bbac81cf-5031-4f2c-b4bd-61db24ccd0e0"
+    }
+  },
+  {
+    "id": "ext-sound_card-05",
+    "category": "sound_card",
+    "query": "sound blaster",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "SoundCard/025f54fa-0ea5-498d-a372-352471d956cd"
+        },
+        {
+          "upstream_key": "SoundCard/102a3161-4390-4e28-a933-10de0b6afc7e"
+        },
+        {
+          "upstream_key": "SoundCard/16c46916-73cf-4ae7-a11b-11a3204f4e19"
+        },
+        {
+          "upstream_key": "SoundCard/3056814a-19a5-4c6f-acb9-a3adb6434496"
+        },
+        {
+          "upstream_key": "SoundCard/37d3efc1-e791-4de3-b139-79c85734b1ec"
+        },
+        {
+          "upstream_key": "SoundCard/7a9d7f07-6b7e-4485-947b-2c2e485effac"
+        },
+        {
+          "upstream_key": "SoundCard/92c4b958-579e-4a67-8bf9-d21c41199006"
+        },
+        {
+          "upstream_key": "SoundCard/9c6464ef-659d-489e-95ee-1440c5b8f11f"
+        },
+        {
+          "upstream_key": "SoundCard/a54d739f-4101-41f5-a797-6b294178825a"
+        },
+        {
+          "upstream_key": "SoundCard/b5103a46-5bc6-4277-8456-a1fcadaf746b"
+        },
+        {
+          "upstream_key": "SoundCard/bbac81cf-5031-4f2c-b4bd-61db24ccd0e0"
+        },
+        {
+          "upstream_key": "SoundCard/c6ef1241-92aa-4526-9b1a-bf7d6d46f70d"
+        },
+        {
+          "upstream_key": "SoundCard/d4afb7d4-182a-43d2-8805-b84d46851153"
+        },
+        {
+          "upstream_key": "SoundCard/d4c4d20d-bf4f-44a7-9279-6ccb1030d229"
+        },
+        {
+          "upstream_key": "SoundCard/d70840ad-a67e-4eb9-9d7f-86a06fe2a9c5"
+        },
+        {
+          "upstream_key": "SoundCard/d7d94384-11c5-4a02-bd5f-52fae6dc122f"
+        },
+        {
+          "upstream_key": "SoundCard/db36c3da-ee54-4b31-aa14-7dfa2edeacf3"
+        },
+        {
+          "upstream_key": "SoundCard/dc910115-a897-4ce8-a3e1-bd76b6aec590"
+        },
+        {
+          "upstream_key": "SoundCard/e368631a-c60e-4518-8b24-c2ea308f55a3"
+        },
+        {
+          "upstream_key": "SoundCard/ea0f89a0-c438-475f-a506-21104d2cebae"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "SoundCard/025f54fa-0ea5-498d-a372-352471d956cd"
+        },
+        {
+          "upstream_key": "SoundCard/102a3161-4390-4e28-a933-10de0b6afc7e"
+        },
+        {
+          "upstream_key": "SoundCard/16c46916-73cf-4ae7-a11b-11a3204f4e19"
+        },
+        {
+          "upstream_key": "SoundCard/3056814a-19a5-4c6f-acb9-a3adb6434496"
+        },
+        {
+          "upstream_key": "SoundCard/37d3efc1-e791-4de3-b139-79c85734b1ec"
+        },
+        {
+          "upstream_key": "SoundCard/7a9d7f07-6b7e-4485-947b-2c2e485effac"
+        },
+        {
+          "upstream_key": "SoundCard/92c4b958-579e-4a67-8bf9-d21c41199006"
+        },
+        {
+          "upstream_key": "SoundCard/9c6464ef-659d-489e-95ee-1440c5b8f11f"
+        },
+        {
+          "upstream_key": "SoundCard/a54d739f-4101-41f5-a797-6b294178825a"
+        },
+        {
+          "upstream_key": "SoundCard/b5103a46-5bc6-4277-8456-a1fcadaf746b"
+        },
+        {
+          "upstream_key": "SoundCard/bbac81cf-5031-4f2c-b4bd-61db24ccd0e0"
+        },
+        {
+          "upstream_key": "SoundCard/c6ef1241-92aa-4526-9b1a-bf7d6d46f70d"
+        },
+        {
+          "upstream_key": "SoundCard/d4afb7d4-182a-43d2-8805-b84d46851153"
+        },
+        {
+          "upstream_key": "SoundCard/d4c4d20d-bf4f-44a7-9279-6ccb1030d229"
+        },
+        {
+          "upstream_key": "SoundCard/d70840ad-a67e-4eb9-9d7f-86a06fe2a9c5"
+        },
+        {
+          "upstream_key": "SoundCard/d7d94384-11c5-4a02-bd5f-52fae6dc122f"
+        },
+        {
+          "upstream_key": "SoundCard/db36c3da-ee54-4b31-aa14-7dfa2edeacf3"
+        },
+        {
+          "upstream_key": "SoundCard/dc910115-a897-4ce8-a3e1-bd76b6aec590"
+        },
+        {
+          "upstream_key": "SoundCard/e368631a-c60e-4518-8b24-c2ea308f55a3"
+        },
+        {
+          "upstream_key": "SoundCard/ea0f89a0-c438-475f-a506-21104d2cebae"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bSound Blaster\\b/i, AND explicit search constraints. All 20 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-network_card-01",
+    "category": "network_card",
+    "query": "Asus NX1101",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "NetworkCard/f2f1237f-8514-446f-b790-81f1ac21d12f"
+    }
+  },
+  {
+    "id": "ext-network_card-02",
+    "category": "network_card",
+    "query": "Asus PCE-C2500",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "NetworkCard/eb37b18a-da57-47e5-ba20-db6160a06896"
+    }
+  },
+  {
+    "id": "ext-network_card-03",
+    "category": "network_card",
+    "query": "NX1101",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "NetworkCard/f2f1237f-8514-446f-b790-81f1ac21d12f"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "NX1101"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-network_card-04",
+    "category": "network_card",
+    "query": "Asus NX1101 Gigabit Ethernet PCI",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "NetworkCard/f2f1237f-8514-446f-b790-81f1ac21d12f"
+    }
+  },
+  {
+    "id": "ext-network_card-05",
+    "category": "network_card",
+    "query": "intel",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "NetworkCard/0d9ade16-c7bf-46dd-9211-86330c718870"
+        },
+        {
+          "upstream_key": "NetworkCard/0dce76a8-3907-4b64-89ea-c3a03677c1e4"
+        },
+        {
+          "upstream_key": "NetworkCard/11a8cbe6-5c5b-464c-89f9-97961904c735"
+        },
+        {
+          "upstream_key": "NetworkCard/1fbdf54d-5fcf-4564-affc-4a91d3fdaf84"
+        },
+        {
+          "upstream_key": "NetworkCard/277bfccc-7643-44c1-9b9a-fa236141a755"
+        },
+        {
+          "upstream_key": "NetworkCard/284a01c8-17b2-48ef-b624-d4fcddf2f448"
+        },
+        {
+          "upstream_key": "NetworkCard/29214882-f1e2-40ea-92fc-ab7dd6848fe9"
+        },
+        {
+          "upstream_key": "NetworkCard/3850de64-715e-4b85-b9ae-0a3c2e8a8e55"
+        },
+        {
+          "upstream_key": "NetworkCard/4ac50f58-ad8c-4f34-bc93-7159ff9fc373"
+        },
+        {
+          "upstream_key": "NetworkCard/58c46c9d-cb17-4335-b259-3b4ca63b1a7c"
+        },
+        {
+          "upstream_key": "NetworkCard/58cfef2f-424a-43ba-9ee0-730802d1e287"
+        },
+        {
+          "upstream_key": "NetworkCard/6089a850-a06e-45f4-b6f6-0b9d91921d44"
+        },
+        {
+          "upstream_key": "NetworkCard/68187bdf-fb74-4602-8959-22d67a35cf59"
+        },
+        {
+          "upstream_key": "NetworkCard/6ebe6719-7980-4f7c-914b-167875711d1b"
+        },
+        {
+          "upstream_key": "NetworkCard/7d07419a-4400-4736-ac76-a94c4c32f2e9"
+        },
+        {
+          "upstream_key": "NetworkCard/8f781729-f1fe-4fc2-bf15-ee1c6c737c60"
+        },
+        {
+          "upstream_key": "NetworkCard/9b0aa25e-7e59-49d7-9b50-0346e9340e31"
+        },
+        {
+          "upstream_key": "NetworkCard/9eb16071-bf7f-40b3-a922-fcabf7ed938c"
+        },
+        {
+          "upstream_key": "NetworkCard/a4a39644-2dab-44bd-9a7f-f48142a745b0"
+        },
+        {
+          "upstream_key": "NetworkCard/aaee30a4-20fc-4ffc-87a3-01189101aa6e"
+        },
+        {
+          "upstream_key": "NetworkCard/acaf8110-151f-4119-b59d-47805fa88dd6"
+        },
+        {
+          "upstream_key": "NetworkCard/ad5633eb-9919-479a-bbfe-3b50ca0a3efb"
+        },
+        {
+          "upstream_key": "NetworkCard/ae8e8277-5a4c-47ff-ab26-419d61b21a4e"
+        },
+        {
+          "upstream_key": "NetworkCard/be823465-5842-463a-af1f-2b1ff9905140"
+        },
+        {
+          "upstream_key": "NetworkCard/bf0767b6-684e-4358-a038-d04997270824"
+        },
+        {
+          "upstream_key": "NetworkCard/c7feb910-642b-45f1-85d8-6bed92622c94"
+        },
+        {
+          "upstream_key": "NetworkCard/cbea75d5-f758-4160-89ea-594ce799c904"
+        },
+        {
+          "upstream_key": "NetworkCard/cf9e4363-91e0-4d70-9a04-25f9f63c0b1b"
+        },
+        {
+          "upstream_key": "NetworkCard/d52c008e-1085-4aaa-963a-aebf5d342103"
+        },
+        {
+          "upstream_key": "NetworkCard/dc7c350a-2942-4603-8b0a-300117b15eb0"
+        },
+        {
+          "upstream_key": "NetworkCard/f6d10baf-b9af-4af5-bb18-eaca8649ad79"
+        },
+        {
+          "upstream_key": "NetworkCard/f97ac9bf-d7bb-4efd-8cba-9d58f3da4647"
+        },
+        {
+          "upstream_key": "NetworkCard/fb2e2f32-9e3c-46ec-a26e-14fbb20d1da9"
+        },
+        {
+          "upstream_key": "NetworkCard/fc1ccbef-d687-4e9d-9291-2c019f61efeb"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "NetworkCard/0d9ade16-c7bf-46dd-9211-86330c718870"
+        },
+        {
+          "upstream_key": "NetworkCard/0dce76a8-3907-4b64-89ea-c3a03677c1e4"
+        },
+        {
+          "upstream_key": "NetworkCard/11a8cbe6-5c5b-464c-89f9-97961904c735"
+        },
+        {
+          "upstream_key": "NetworkCard/1fbdf54d-5fcf-4564-affc-4a91d3fdaf84"
+        },
+        {
+          "upstream_key": "NetworkCard/277bfccc-7643-44c1-9b9a-fa236141a755"
+        },
+        {
+          "upstream_key": "NetworkCard/284a01c8-17b2-48ef-b624-d4fcddf2f448"
+        },
+        {
+          "upstream_key": "NetworkCard/29214882-f1e2-40ea-92fc-ab7dd6848fe9"
+        },
+        {
+          "upstream_key": "NetworkCard/3850de64-715e-4b85-b9ae-0a3c2e8a8e55"
+        },
+        {
+          "upstream_key": "NetworkCard/4ac50f58-ad8c-4f34-bc93-7159ff9fc373"
+        },
+        {
+          "upstream_key": "NetworkCard/58c46c9d-cb17-4335-b259-3b4ca63b1a7c"
+        },
+        {
+          "upstream_key": "NetworkCard/58cfef2f-424a-43ba-9ee0-730802d1e287"
+        },
+        {
+          "upstream_key": "NetworkCard/6089a850-a06e-45f4-b6f6-0b9d91921d44"
+        },
+        {
+          "upstream_key": "NetworkCard/68187bdf-fb74-4602-8959-22d67a35cf59"
+        },
+        {
+          "upstream_key": "NetworkCard/6ebe6719-7980-4f7c-914b-167875711d1b"
+        },
+        {
+          "upstream_key": "NetworkCard/7d07419a-4400-4736-ac76-a94c4c32f2e9"
+        },
+        {
+          "upstream_key": "NetworkCard/8f781729-f1fe-4fc2-bf15-ee1c6c737c60"
+        },
+        {
+          "upstream_key": "NetworkCard/9b0aa25e-7e59-49d7-9b50-0346e9340e31"
+        },
+        {
+          "upstream_key": "NetworkCard/9eb16071-bf7f-40b3-a922-fcabf7ed938c"
+        },
+        {
+          "upstream_key": "NetworkCard/a4a39644-2dab-44bd-9a7f-f48142a745b0"
+        },
+        {
+          "upstream_key": "NetworkCard/aaee30a4-20fc-4ffc-87a3-01189101aa6e"
+        },
+        {
+          "upstream_key": "NetworkCard/acaf8110-151f-4119-b59d-47805fa88dd6"
+        },
+        {
+          "upstream_key": "NetworkCard/ad5633eb-9919-479a-bbfe-3b50ca0a3efb"
+        },
+        {
+          "upstream_key": "NetworkCard/ae8e8277-5a4c-47ff-ab26-419d61b21a4e"
+        },
+        {
+          "upstream_key": "NetworkCard/be823465-5842-463a-af1f-2b1ff9905140"
+        },
+        {
+          "upstream_key": "NetworkCard/bf0767b6-684e-4358-a038-d04997270824"
+        },
+        {
+          "upstream_key": "NetworkCard/c7feb910-642b-45f1-85d8-6bed92622c94"
+        },
+        {
+          "upstream_key": "NetworkCard/cbea75d5-f758-4160-89ea-594ce799c904"
+        },
+        {
+          "upstream_key": "NetworkCard/cf9e4363-91e0-4d70-9a04-25f9f63c0b1b"
+        },
+        {
+          "upstream_key": "NetworkCard/d52c008e-1085-4aaa-963a-aebf5d342103"
+        },
+        {
+          "upstream_key": "NetworkCard/dc7c350a-2942-4603-8b0a-300117b15eb0"
+        },
+        {
+          "upstream_key": "NetworkCard/f6d10baf-b9af-4af5-bb18-eaca8649ad79"
+        },
+        {
+          "upstream_key": "NetworkCard/f97ac9bf-d7bb-4efd-8cba-9d58f3da4647"
+        },
+        {
+          "upstream_key": "NetworkCard/fb2e2f32-9e3c-46ec-a26e-14fbb20d1da9"
+        },
+        {
+          "upstream_key": "NetworkCard/fc1ccbef-d687-4e9d-9291-2c019f61efeb"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bIntel\\b/i, AND explicit search constraints. All 34 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-thermal_compound-01",
+    "category": "thermal_compound",
+    "query": "Noctua NT-H1 3.5g",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "ThermalCompound/e3025280-46a4-4472-8e0e-e4cd6da2862b"
+    }
+  },
+  {
+    "id": "ext-thermal_compound-02",
+    "category": "thermal_compound",
+    "query": "Kryonaut Extreme 2g",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "ThermalCompound/fa26b1fc-7696-4022-9044-aa90e1fb29d2"
+    }
+  },
+  {
+    "id": "ext-thermal_compound-03",
+    "category": "thermal_compound",
+    "query": "NT-H1",
+    "class": "identifier",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "ThermalCompound/e3025280-46a4-4472-8e0e-e4cd6da2862b"
+    },
+    "search": {
+      "identifier": {
+        "type": "mpn",
+        "value": "NT-H1"
+      }
+    },
+    "notes": "Source identifier, including an explicit identifier filter; collisions remain visible rather than selecting a returned SKU."
+  },
+  {
+    "id": "ext-thermal_compound-04",
+    "category": "thermal_compound",
+    "query": "Noctua NT-H1 3.5g Thermal Paste",
+    "class": "exact_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "ThermalCompound/e3025280-46a4-4472-8e0e-e4cd6da2862b"
+    }
+  },
+  {
+    "id": "ext-thermal_compound-05",
+    "category": "thermal_compound",
+    "query": "arctic mx-4",
+    "class": "broad",
+    "suite": "extended",
+    "expected": {
+      "anyOf": [
+        {
+          "upstream_key": "ThermalCompound/2ee27131-dec2-4677-939a-b7f3e280c794"
+        },
+        {
+          "upstream_key": "ThermalCompound/389d0983-10f2-416a-baab-e10ca2b79613"
+        },
+        {
+          "upstream_key": "ThermalCompound/43c9fe83-b988-4f55-b924-4d1941d9c30a"
+        },
+        {
+          "upstream_key": "ThermalCompound/71df7e44-83bc-44e4-9253-2b57f538905c"
+        },
+        {
+          "upstream_key": "ThermalCompound/b5ef6841-f778-4bb9-9822-2aef9229ae07"
+        },
+        {
+          "upstream_key": "ThermalCompound/b6d6c863-11d8-4825-977e-413516599d33"
+        },
+        {
+          "upstream_key": "ThermalCompound/ebe4758a-9bf2-41e1-a991-31f5e0369362"
+        },
+        {
+          "upstream_key": "ThermalCompound/f0ada989-d278-4c87-8edf-652244d08bbc"
+        },
+        {
+          "upstream_key": "ThermalCompound/f1f1d680-b47a-4781-9e53-e2d72e85be1c"
+        }
+      ]
+    },
+    "search": {},
+    "acceptable": {
+      "anyOf": [
+        {
+          "upstream_key": "ThermalCompound/2ee27131-dec2-4677-939a-b7f3e280c794"
+        },
+        {
+          "upstream_key": "ThermalCompound/389d0983-10f2-416a-baab-e10ca2b79613"
+        },
+        {
+          "upstream_key": "ThermalCompound/43c9fe83-b988-4f55-b924-4d1941d9c30a"
+        },
+        {
+          "upstream_key": "ThermalCompound/71df7e44-83bc-44e4-9253-2b57f538905c"
+        },
+        {
+          "upstream_key": "ThermalCompound/b5ef6841-f778-4bb9-9822-2aef9229ae07"
+        },
+        {
+          "upstream_key": "ThermalCompound/b6d6c863-11d8-4825-977e-413516599d33"
+        },
+        {
+          "upstream_key": "ThermalCompound/ebe4758a-9bf2-41e1-a991-31f5e0369362"
+        },
+        {
+          "upstream_key": "ThermalCompound/f0ada989-d278-4c87-8edf-652244d08bbc"
+        },
+        {
+          "upstream_key": "ThermalCompound/f1f1d680-b47a-4781-9e53-e2d72e85be1c"
+        }
+      ]
+    },
+    "notes": "Snapshot-only relevance rule: name /\\bArctic MX-4\\b/i, AND explicit search constraints. All 9 source records are enumerated; no ranking-based selection."
+  },
+  {
+    "id": "ext-accessory-01",
+    "category": "accessory",
+    "query": "APC BN450MNW",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Accessory/cfee4a1b-6850-4ed0-950e-497996cc08af"
+    }
+  },
+  {
+    "id": "ext-accessory-02",
+    "category": "accessory",
+    "query": "APC BN1500M2",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Accessory/86069191-d876-411b-a301-b2140e65e726"
+    }
+  },
+  {
+    "id": "ext-chair-01",
+    "category": "chair",
+    "query": "BLACKLYTE Athena Fabric Black",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Chair/25defeb2-b8a0-4170-a71e-0958b90187a1"
+    }
+  },
+  {
+    "id": "ext-chair-02",
+    "category": "chair",
+    "query": "BLACKLYTE Athena Fabric Camo",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Chair/ba9a5adf-1455-432c-b9a9-b6b157f51494"
+    }
+  },
+  {
+    "id": "ext-desk-01",
+    "category": "desk",
+    "query": "Amazon Basics Electric Standing Desk Black Walnut",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Desk/2c0d93e8-efb7-41be-a7e7-654a9ff2875d"
+    }
+  },
+  {
+    "id": "ext-desk-02",
+    "category": "desk",
+    "query": "Amazon Basics Electric Standing Desk White Oak",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Desk/b27e3c1b-3dc0-4de0-993a-e23d56f26c8d"
+    }
+  },
+  {
+    "id": "ext-laptop-01",
+    "category": "laptop",
+    "query": "ASUS P5405CSA-DH54",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Laptop/66f08d6b-668b-4ef0-bebe-f971ae5b16a7"
+    }
+  },
+  {
+    "id": "ext-laptop-02",
+    "category": "laptop",
+    "query": "ASUS P5405CSA-DH76",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Laptop/a5d86627-2163-4c97-82b0-a7bb63772a2a"
+    }
+  },
+  {
+    "id": "ext-lighting-01",
+    "category": "lighting",
+    "query": "Elgato Key Light",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Lighting/13319d02-fb4d-42b8-8932-93d1d8383841"
+    }
+  },
+  {
+    "id": "ext-lighting-02",
+    "category": "lighting",
+    "query": "Elgato Key Light Neo",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Lighting/484a47cf-077b-4b20-b8b3-7de452be7cc5"
+    }
+  },
+  {
+    "id": "ext-mousepad-01",
+    "category": "mousepad",
+    "query": "ASUS ROG Moonstone Ace L Black",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mousepad/a73b842e-7d52-4fdf-ba8b-41fbc1c62973"
+    }
+  },
+  {
+    "id": "ext-mousepad-02",
+    "category": "mousepad",
+    "query": "ASUS ROG Moonstone Ace L Moonlight White",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Mousepad/ae3e9f6e-c1c2-485b-8de7-711ed5bce27a"
+    }
+  },
+  {
+    "id": "ext-os-01",
+    "category": "os",
+    "query": "Microsoft Windows 10 Home Download",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "OS/06351667-b638-46e4-88d9-5829230a9fcc"
+    }
+  },
+  {
+    "id": "ext-os-02",
+    "category": "os",
+    "query": "Microsoft Windows 10 Home USB Flash Drive",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "OS/1fab27b8-12a8-4f16-aa04-8db160c0167e"
+    }
+  },
+  {
+    "id": "ext-prebuilt_desktop-01",
+    "category": "prebuilt_desktop",
+    "query": "Alienware AAT2250",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "PrebuiltDesktop/03192e27-53c7-47ca-8f56-e5effa659d1b"
+    }
+  },
+  {
+    "id": "ext-prebuilt_desktop-02",
+    "category": "prebuilt_desktop",
+    "query": "Alienware AAT2265",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "PrebuiltDesktop/98da01cb-228b-4b57-8e7b-9e15d5235950"
+    }
+  },
+  {
+    "id": "ext-stand-01",
+    "category": "stand",
+    "query": "CORSAIR ST100 RGB",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "Stand/28a131b6-32cd-4774-8415-794bb50b5678"
+    }
+  },
+  {
+    "id": "ext-vr_headset-01",
+    "category": "vr_headset",
+    "query": "Meta Quest 2 128GB",
+    "class": "manufacturer_model",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "VRHeadset/8282f393-e404-45bf-b6f7-05d85e3db6aa"
+    }
+  },
+  {
+    "id": "ext-vr_headset-02",
+    "category": "vr_headset",
+    "query": "Meta Quest 2 256GB",
+    "class": "variant",
+    "suite": "extended",
+    "expected": {
+      "upstream_key": "VRHeadset/637022f6-7c14-450e-8e10-d2a6cd355c24"
+    }
+  }
+]

@@ -26,6 +26,25 @@ defines Precision@5/10 with a fixed K denominator (missing slots count as nonrel
 See [the evaluation contract](../../docs/search-evaluation-phase2.md) for evidence,
 scope, classes, limitations, and fixture hashes.
 
+## Independent extended suite
+
+`search-extended.json` contains 102 snapshot-grounded cases for the additional 21
+categories. It is loaded explicitly, never appended to the default frozen 120.
+`search-extended-evidence.json` records stable upstream keys, source paths, names,
+identifiers, specs/facets and complete relevant-product lists for source-only group
+judgments. Its independent SHA-256 is
+`0159fb0832226c96918e2d24052e5917ea357069cac71999d0284a5c5c28f4be`.
+
+These initial extended judgments are **pending human review**, with no generated
+rank/precision floor. Two exact/manufacturer cases share their search input;
+review that weighting as well as same-model SKU/bundle ambiguity. The source recipe
+`scripts/prepare-extended-golden.js` has no search-results input. Its default mode
+checks frozen bytes, and `--write` refuses to overwrite existing fixtures.
+
+See [the corpus experiment](../../docs/fts-corpus-experiment.md) for A/B measurements,
+BM25 counterfactuals, recall/overlap definitions, per-category/class results and the
+decision to retain the production 2-FTS design.
+
 Contains information from [BuildCores OpenDB](https://github.com/buildcores/buildcores-open-db),
 which is made available under the [ODC Attribution License](https://opendatacommons.org/licenses/by/1-0/).
 Preserve [NOTICE.md](../../NOTICE.md) with this fixture when redistributing it.

@@ -64,6 +64,10 @@ test('precision uses fixed K slots, suites/classes aggregate separately, invalid
   assert.equal(report.results[1].precision_at_5,0);
   assert.equal(report.summary.precision_at_5,1/5);
   assert.equal(report.summary.precision_query_count,2);
+  assert.equal(report.results[0].recall_at_10,1);
+  assert.equal(report.results[1].recall_at_10,0);
+  assert.equal(report.summary.recall_at_10,0.5);
+  assert.equal(report.by_suite.holdout.zero_result_rate,1);
   assert.equal(report.by_suite.development.hit_at_1,1);
   assert.equal(report.by_class.spec_only.hit_at_1,0);
   assert.equal(report.new_suite.scored_query_count,2);

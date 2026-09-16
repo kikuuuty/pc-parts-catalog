@@ -5,8 +5,8 @@ import { searchQuery } from '../queries.js';
 import { assertCatalogState, envelope, isMissing, manufacturerKey, nameKey, normalizedIdentifier, productSummary, validIdentifiers } from './catalog.js';
 import { selectExpectedSet } from './selection.js';
 
-export const queryClasses = ['exact_model','compact_model','family','manufacturer_model','model_spec','spec_only','identifier','broad','fallback'];
-export const querySuites = ['regression','development','holdout'];
+export const queryClasses = ['exact_model','compact_model','family','manufacturer_model','model_spec','spec_only','identifier','broad','fallback','variant','typed_spec','facet','range'];
+export const querySuites = ['regression','development','holdout','extended'];
 
 export const failureTypes = ['MISSING_PRODUCT','NO_SEARCH_MATCH','RANKING_FAILURE','EXPECTED_DATA_INVALID'];
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -88,6 +88,7 @@ export function benchmarkMetrics(results) {
     query_count: results.length, scored_query_count: scored.length,
     missing_expected_target_count: results.reduce((sum,r) => sum + (r.missing_targets?.length ?? 0),0),
     zero_result_count: results.filter(r => r.zero_results === true).length,
+    zero_result_rate: rate(scored.filter(r => r.zero_results === true).length),
     failed_query_count: results.filter(r => r.status !== 'HIT').length,
     hit_at_1: rate(scored.filter(r => r.rank !== null && r.rank <= 1).length),
     hit_at_5: rate(scored.filter(r => r.rank !== null && r.rank <= 5).length),
@@ -96,6 +97,7 @@ export function benchmarkMetrics(results) {
     precision_query_count: precision.length,
     precision_at_5: precision.length ? precision.reduce((sum,r) => sum+r.precision_at_5,0)/precision.length : null,
     precision_at_10: precision.length ? precision.reduce((sum,r) => sum+r.precision_at_10,0)/precision.length : null,
+    recall_at_10: scored.some(r => r.recall_at_10 != null) ? scored.filter(r => r.recall_at_10 != null).reduce((n,r) => n+r.recall_at_10,0)/scored.filter(r => r.recall_at_10 != null).length : null,
     failures: Object.fromEntries(failureTypes.map(type => [type, results.filter(r => r.status === type).length])),
   };
 }
@@ -108,7 +110,7 @@ function validateCase(item) {
   if (item.search !== undefined && (!object(item.search) || Object.keys(item.search).some(k => !['filters','ranges','facets','identifier','orderBy'].includes(k)))) throw new Error('search only accepts actual searchQuery filters/ranges/facets/identifier/orderBy');
 }
 
-export async function benchmarkSearch(db, catalog, fixture, { category, suite, queryClass, fixtureHash = null, searchImplementationHash = null } = {}) {
+export async function benchmarkSearch(db, catalog, fixture, { category, suite, queryClass, fixtureHash = null, searchImplementationHash = null, queryBuilder = searchQuery } = {}) {
   if (!Array.isArray(fixture) || !fixture.length) throw new Error('Benchmark fixture must be a nonempty JSON array');
   if (category !== undefined && !categories.includes(category)) throw new Error(`Unknown category: ${category}`);
   if (suite !== undefined && ![...querySuites,'new'].includes(suite)) throw new Error(`Unknown suite: ${suite}`);
@@ -135,7 +137,7 @@ export async function benchmarkSearch(db, catalog, fixture, { category, suite, q
     try {
       validateCase(item);
       if (ids.get(item.id) > 1) throw new Error('Duplicate fixture case id');
-      query = searchQuery(item.category, { ...item.search, keyword: item.query, limit: 100 });
+      query = queryBuilder(item.category, { ...item.search, keyword: item.query, limit: 100 });
       resolution = resolveExpected(catalog, item.category, item.expected);
       if (resolution.status === 'EXPECTED_DATA_INVALID') {
         result.ambiguous_targets = resolution.ambiguous;
@@ -175,10 +177,11 @@ export async function benchmarkSearch(db, catalog, fixture, { category, suite, q
       result.size_bytes = page.meta?.size_after ?? null;
       if (offset === 0) {
         result.zero_results = page.results.length === 0;
-        result.top_results = page.results.slice(0,10).map((p,index) => ({ rank: index+1, ...productSummary(p) }));
+        result.top_results = page.results.slice(0,20).map((p,index) => ({ rank: index+1, ...productSummary(p) }));
         if (acceptable) {
           result.precision_at_5 = page.results.slice(0,5).filter(p => acceptable.has(p.id)).length/5;
           result.precision_at_10 = page.results.slice(0,10).filter(p => acceptable.has(p.id)).length/10;
+          result.recall_at_10 = acceptable.size > 1 ? page.results.slice(0,10).filter(p => acceptable.has(p.id)).length/acceptable.size : null;
         }
       }
       result.retrieved_count += page.results.length;
