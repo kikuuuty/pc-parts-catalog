@@ -34,7 +34,8 @@ function modelForms(token) {
   return [...new Set([token, `${head} ${digits}${tail}`.trim(), `${head}${digits} ${tail}`.trim(), `${head} ${digits} ${tail}`.trim()])];
 }
 function expressionFor(tokens, prefix = true) {
-  const term = value => `"${value}"${prefix && !/^\d$/.test(value) ? '*' : ''}`;
+  // Short model numbers are complete tokens: Q1 is not Q14, G7 is not G75.
+  const term = value => `"${value}"${prefix && !/^(?:\d|[a-z]{1,5}\d{1,2})$/i.test(value) ? '*' : ''}`;
   const single = token => modelForms(token).map(term);
   const parts = [];
   // Non-overlapping, longest model groups keep expansion linear in query length.
@@ -152,7 +153,9 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   let from = `products p JOIN ${model.table} s ON s.product_id=p.id`;
   // Retrieve typed candidates before display sorting. Otherwise the listing
   // index can entice SQLite into probing an entire category for sparse filters.
-  const typedIndex=Object.entries(model.indexes).map(([name,columns])=>{
+  // 0005 added this path after the frozen initial model index declarations.
+  const typedIndexes={...model.indexes,...(category==='motherboard'?{motherboard_search_chipset:['chipset','product_id']}:{})};
+  const typedIndex=Object.entries(typedIndexes).map(([name,columns])=>{
     let prefix=0;
     for(const field of columns) {
       if(Object.hasOwn(filters,field))prefix+=2;
@@ -190,6 +193,24 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     // spec+lexical path instead. Digit-bearing model anchors remain unrestricted.
     const boundedLexical = !intent.specOnly && !intent.identity && intent.specs.length>=2 && !/\d/.test(intent.remaining) && seed;
     const terms = {...searchTerms(intent.keyword),intent,name:keyword.normalize('NFKC').trim().toLowerCase()};
+    // SATA is the protocol family; mSATA uses it too. Query-side FTS alias keeps
+    // the existing corpus/migrations intact and retains every other token.
+    const protocolAlias=category==='storage'&&/"sata"\*/i.test(terms.strict.prefix);
+    if(protocolAlias) {
+      terms.protocolPrefix=terms.strict.prefix.replace(/"sata"\*/gi,'"msata"*');
+      // Use the same protocol equivalence in ranking. Otherwise an mSATA hit
+      // falls through every tier, repeatedly opening broad SATA match lists.
+      for(const field of ['namePhrase','nameExact','modelExact','namePrefix','familyExact','fieldsExact'])
+        terms.strict[field]=terms.strict[field].replace(/"sata"(\*)?/gi,(_,prefix='')=>`("sata"${prefix} OR "msata"${prefix})`);
+    }
+    // Preserve short model adjacency. Independent bag-of-word hits otherwise
+    // mistake USB Type-C for Meshify C or a 4g package for MX-4.
+    const shortModel=intent.keyword.match(/\b([a-z]{1,5})-(\d{1,2})\b/i);
+    const letterVariant=intent.keyword.match(/^([a-z]{2,})\s+([a-z])$/i);
+    const anchor=shortModel?[shortModel[1],shortModel[2]]:letterVariant?.slice(1);
+    if(anchor)terms.strict.prefix=`(${terms.strict.prefix}) AND ("${anchor.join(' ')}"${shortModel?` OR "${anchor.join('')}"`:''})`;
+    const shortNumbers=keywordTokens(intent.keyword).filter(t=>/^[a-z]{1,5}\d{1,2}$/i.test(t));
+    if(shortNumbers.length&&!identifier)terms.candidatePrefix=`(${terms.strict.prefix}) AND {name series variant family} : (${shortNumbers.map(t=>`"${t}"`).join(' AND ')})`;
     if (boundedLexical) terms.literalPrefix=keywordExpression(intent.literal);
     // Exact identifiers always use the unconsumed input and Phase 1 trust rules.
     terms.identifierKind = searchTerms(keyword).identifierKind;
@@ -203,7 +224,8 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     params.push(JSON.stringify(terms), identifierKey(keyword));
     const value = path => `(SELECT json_extract(q,'$.${path}') FROM search_input)`;
     const fts = (mode, guard = '') => `SELECT rowid AS id,-bm25(${index},0.1,10,2,4,3,4) AS relevance
-        FROM ${index} WHERE ${guard}${index} MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}
+        FROM ${index} WHERE ${guard}${index} MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : mode==='strict'&&terms.candidatePrefix?'candidatePrefix':`${mode}.prefix`)}
+      ${mode==='strict'&&protocolAlias?`UNION ALL SELECT rowid,-bm25(${index},0.1,10,2,4,3,4) FROM ${index} WHERE ${index} MATCH ${value('protocolPrefix')}`:''}
       UNION ALL SELECT i.product_id,0 FROM local_identifier_fts JOIN local_identifiers i ON i.id=local_identifier_fts.rowid
         WHERE ${guard}local_identifier_fts MATCH ${value(mode==='strict' && boundedLexical ? 'literalPrefix' : `${mode}.prefix`)}`;
     // Both joins are PK lookups: each hit ID determines exactly one product/spec

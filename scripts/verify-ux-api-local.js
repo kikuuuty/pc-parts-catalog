@@ -29,6 +29,15 @@ try {
   while(cursor) {const page=await search({cursor,limit:37});all.push(...page.data);cursor=page.meta.next_cursor;pages++;}
   const expected=source.products.filter(p=>p.category===input.category&&matchesFilters(p,input)).map(p=>p.id).sort((a,b)=>a-b);
   assert.deepEqual(all.map(p=>p.id).sort((a,b)=>a-b),expected);assert.equal(new Set(all.map(p=>p.id)).size,expected.length);
+  const sataInput={category:'storage',keyword:'sata',filters:{capacity_gb:1000,nvme:0,storage_type:'SSD'},limit:50};
+  const sata=[];let offset=0;
+  do {
+    const response=await fetcher('https://local.catalog/v1/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...sataInput,offset})});
+    assert.equal(response.status,200);const page=await response.json();sata.push(...page.data);offset=page.meta.next_offset;
+  }while(offset!==null);
+  const sataExpected=source.products.filter(p=>p.category==='storage'&&matchesFilters(p,sataInput)&&p.name.toLowerCase().includes('sata'));
+  assert.deepEqual(sata.map(p=>p.id).sort((a,b)=>a-b),sataExpected.map(p=>p.id).sort((a,b)=>a-b));
+  const msata=sata.filter(p=>p.specs.interface==='mSATA');
   const selected=[...new Set(source.products.map(p=>p.category))].map(c=>source.products.find(p=>p.category===c));
   const refs=referencesFromURL(buildURL('https://frontend.example/build',selected));refs.push(refs[0],{source:'unknown',upstream_key:'CPU/missing'});
   const before=events.length,restored=await restoreBuild('https://local.catalog',refs,fetcher);
@@ -38,7 +47,7 @@ try {
     const response=await fetcher(`https://local.catalog/v1/products/${p.id}`),detail=await response.json();
     assert.equal(response.status,200);assert.equal(detail.source,p.source);assert.equal(detail.upstream_key,p.upstream_key);
   }
-  const report={environment:'local D1 + real Worker fetch handler',snapshot:snapshot.commit,pagination:{pages,products:all.length,duplicates:0,missing:0,replay:'pass',page_sizes:[17,37]},shared_build:{references:refs.length,categories:selected.length,resolve_queries:1,detail_identity:'pass'},events};
+  const report={environment:'local D1 + real Worker fetch handler',snapshot:snapshot.commit,pagination:{pages,products:all.length,duplicates:0,missing:0,replay:'pass',page_sizes:[17,37]},sata:{expected:sataExpected.length,returned:sata.length,missing:0,msata:msata.map(p=>({name:p.name,upstream_key:p.upstream_key}))},shared_build:{references:refs.length,categories:selected.length,resolve_queries:1,detail_identity:'pass'},events};
   await writeFile('.cache/ux-api-local.json',JSON.stringify(report,null,2)+'\n');
   console.log(JSON.stringify({...report,events:undefined},null,2));
 } finally {await db.close();}

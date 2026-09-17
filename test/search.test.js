@@ -20,6 +20,36 @@ const search = async (db,category,keyword,options = {}) => {
 };
 const names = rows => rows.map(r => r.name);
 
+test('SATA protocol family includes mSATA before typed filters without widening category or capacity',async t=>{
+  const db=database();t.after(()=>db.sqlite.close());
+  await seed(db,[
+    record('storage','Integral MO-300 mSATA',{}, {storage_type:'SSD',capacity:1000,nvme:false,interface:'mSATA',form_factor:'mSATA'}),
+    record('storage','Kingston KC600 mSATA',{}, {storage_type:'SSD',capacity:1000,nvme:false,interface:'mSATA'}),
+    record('storage','Example SATA',{}, {storage_type:'SSD',capacity:1000,nvme:false}),
+    record('storage','Small mSATA',{}, {storage_type:'SSD',capacity:500,nvme:false}),
+    record('storage','NVMe',{}, {storage_type:'SSD',capacity:1000,nvme:true}),
+    record('mouse','mSATA'),
+  ]);
+  const options={filters:{capacity_gb:1000,storage_type:'SSD',nvme:0}};
+  const rows=await search(db,'storage','sata',options);
+  assert.deepEqual(new Set(names(rows)),new Set(['Integral MO-300 mSATA','Kingston KC600 mSATA','Example SATA']));
+  assert(rows.every(p=>p.search_match==='name-phrase')); // alias must not fall through broad ranking tiers
+  assert.deepEqual(names(await search(db,'storage','kingston sata',options)),['Kingston KC600 mSATA']);
+  assert.deepEqual(await search(db,'mouse','sata'),[]);
+});
+
+test('family suffixes and short models cannot match unrelated USB letters, package sizes or identifier noise',async t=>{
+  const db=database();t.after(()=>db.sqlite.close());
+  await seed(db,[record('case','Fractal Meshify C'),record('case','Fractal Meshify 2 USB Type-C'),record('case','Fractal Meshify 2 Compact'),
+    record('thermal_compound','Arctic MX-4 8g'),record('thermal_compound','Arctic MX-6 4 g'),record('thermal_compound','Arctic MX-2 4g'),
+    record('keyboard','Keychron Q1 Pro',{part_numbers:['Q1-M1']}),record('keyboard','Keychron Q14 Pro'),record('keyboard','Keychron K2',{part_numbers:['Q1']})]);
+  assert.deepEqual(names(await search(db,'case','meshify c')),['Fractal Meshify C']);
+  assert.equal((await search(db,'case','meshify')).length,3);
+  assert.deepEqual(names(await search(db,'thermal_compound','arctic mx-4')),['Arctic MX-4 8g']);
+  assert.deepEqual(names(await search(db,'keyboard','keychron q1')),['Keychron Q1 Pro']);
+  assert.deepEqual(names(await search(db,'keyboard','Q1-M1',{identifier:{type:'mpn',value:'Q1-M1'}})),['Keychron Q1 Pro']);
+});
+
 test('whole name/model tokens outrank suffix SKUs and contradictory variant fields', async t => {
   const db = database(); t.after(() => db.sqlite.close());
   const models = ['14900K','285K','9800X3D','7640U']; // Includes a model outside Golden Query.

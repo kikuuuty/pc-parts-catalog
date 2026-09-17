@@ -1,15 +1,18 @@
 import { models } from '../model.js';
 import { nameKey } from './catalog.js';
+import { identifierKey } from '../normalize.js';
 
 // Evaluation-only predicates. These never become search filters or ranking inputs.
 export function selectExpectedSet(catalog, category, selector) {
   const object = v => v !== null && typeof v === 'object' && !Array.isArray(v);
   if (!object(selector) || Object.keys(selector).length !== 1 || !object(selector.set)) throw new Error('Invalid set selector');
-  const { fields = {}, nameContains = [], nameTokens = [] } = selector.set;
-  if (Object.keys(selector.set).some(k => !['fields','nameContains','nameTokens'].includes(k)) || !object(fields) ||
+  const { fields = {}, nameContains = [], nameTokens = [], nameAnyContains = [], identifier } = selector.set;
+  if (Object.keys(selector.set).some(k => !['fields','nameContains','nameTokens','nameAnyContains','identifier'].includes(k)) || !object(fields) ||
       !Array.isArray(nameContains) || nameContains.some(v => typeof v !== 'string' || !v.trim()) ||
       !Array.isArray(nameTokens) || nameTokens.some(v => typeof v !== 'string' || !/^[\p{L}\p{N}]+$/u.test(v)) ||
-      !Object.keys(fields).length && !nameContains.length && !nameTokens.length) throw new Error('Set needs nonempty fields/nameContains/nameTokens');
+      !Array.isArray(nameAnyContains) || nameAnyContains.some(v=>typeof v!=='string'||!v.trim()) ||
+      identifier!==undefined&&(!object(identifier)||Object.keys(identifier).some(k=>!['type','value'].includes(k))||!catalog.identifierTypes.includes(identifier.type)||typeof identifier.value!=='string'||!identifier.value.trim()) ||
+      !Object.keys(fields).length && !nameContains.length && !nameTokens.length && !nameAnyContains.length && !identifier) throw new Error('Set needs nonempty source predicates');
   const types = Object.fromEntries([
     ...catalog.productFields.map(f => [`product.${f.name}`,f.type]),
     ...Object.entries(models[category].fields).map(([k,v]) => [`spec.${k}`,v]),
@@ -26,6 +29,7 @@ export function selectExpectedSet(catalog, category, selector) {
       const actual = scope === 'product' ? p[key] : p.spec?.[key];
       if (actual == null) return false;
       return (Array.isArray(raw) ? raw : [raw]).some(v => types[field] === 'TEXT' ? nameKey(actual) === nameKey(v) : actual === v);
-    }) && nameContains.every(v => nameKey(p.name)?.includes(nameKey(v))) &&
+    }) && (!identifier||p.identifiers.some(i=>i.type===identifier.type&&identifierKey(i.value)===identifierKey(identifier.value))) &&
+    (!nameAnyContains.length||nameAnyContains.some(v=>nameKey(p.name)?.includes(nameKey(v)))) && nameContains.every(v => nameKey(p.name)?.includes(nameKey(v))) &&
     nameTokens.every(v => (nameKey(p.name)?.match(/[\p{L}\p{N}]+/gu) ?? []).includes(nameKey(v))));
 }

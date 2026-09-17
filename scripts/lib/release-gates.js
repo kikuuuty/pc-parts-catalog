@@ -98,9 +98,11 @@ export async function searchGate(db) {
   const report = await evaluateUX(db, catalog, fixture, { fixtureHash: hash,source:sourceCatalog(snapshot,catalog) });
   const budgets=process.env.PERFORMANCE_BUDGET_FILE?JSON.parse(await readFile(process.env.PERFORMANCE_BUDGET_FILE,'utf8')):{};
   report.release_failures=qualityFailures(report,{budgets});
+  report.diagnostic_commands=[...new Set(report.release_failures.map(f=>f.split(':')[0]))].filter(id=>report.results.some(r=>r.id===id)).map(id=>`npm run diagnose:search -- --case ${id}`);
   report.source_integrity=sourceIntegrity;
   report.plans=plans;
   await writeFile('.cache/release-ux-report.json',JSON.stringify(report,null,2)+'\n');
+  for(const command of report.diagnostic_commands)console.log(command);
   assert(plans.length > 0 && plans.every(r => r.index_check), 'Query plan gate failed');
   assert.deepEqual(report.release_failures,[],'UX release gate failed');
   return { golden: report.by_intent, plans: plans.length };

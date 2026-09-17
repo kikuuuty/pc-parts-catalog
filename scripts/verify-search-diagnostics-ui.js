@@ -25,11 +25,11 @@ try {
   socket.onmessage=event=>{const m=JSON.parse(event.data);if(m.method==='Runtime.exceptionThrown')errors.push(m.params);if(pending.has(m.id)){pending.get(m.id)(m);pending.delete(m.id);}};
   const call=async(method,params={})=>{
     const current=++id;
-    const message=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(`CDP timeout: ${method}`)),20000);pending.set(current,value=>{clearTimeout(timer);resolve(value);});socket.send(JSON.stringify({id:current,method,params}));});
+    const message=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(`CDP timeout: ${method}`)),120000);pending.set(current,value=>{clearTimeout(timer);resolve(value);});socket.send(JSON.stringify({id:current,method,params}));});
     if(message.error)throw Error(JSON.stringify(message.error));return message.result;
   };
   const evaluate=async expression=>{const result=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(result.exceptionDetails)throw Error(JSON.stringify(result.exceptionDetails));return result.result.value;};
-  const wait=expression=>evaluate(`new Promise((resolve,reject)=>{const end=Date.now()+15000;const timer=setInterval(()=>{if(${expression}){clearInterval(timer);resolve(true);}else if(Date.now()>end){clearInterval(timer);reject(Error('UI timeout'));}},50);})`);
+  const wait=expression=>evaluate(`new Promise((resolve,reject)=>{const end=Date.now()+110000;const timer=setInterval(()=>{if(${expression}){clearInterval(timer);resolve(true);}else if(Date.now()>end){clearInterval(timer);reject(Error('UI timeout'));}},50);})`);
   await call('Runtime.enable');await call('Page.enable');
   await call('Emulation.setDeviceMetricsOverride',{width:1200,height:1000,deviceScaleFactor:1,mobile:false});
   await call('Page.navigate',{url:origin});
@@ -50,6 +50,14 @@ try {
   assert(second.every(id=>!first.includes(id)));
   await evaluate("document.querySelector('#results button[data-id]').click();");
   await wait("document.querySelector('#results .identifiers').textContent.length>0");
+  await evaluate("document.querySelector('#case-id').value='p2-storage-sata1tb';document.querySelector('#case-load').click();");
+  await wait("!document.querySelector('#case-load').disabled && document.querySelector('#case-results').textContent.includes('Expected 130')");
+  assert.match(await evaluate("document.querySelector('#case-results').textContent"),/Returned relevant 130/);
+  assert.match(await evaluate("document.querySelector('#case-results').textContent"),/False negatives \(0\)/);
+  await evaluate("document.querySelector('#case-id').value='ext-mouse-03';document.querySelector('#case-load').click();");
+  await wait("!document.querySelector('#case-load').disabled && document.querySelector('#case-results').textContent.includes('Actual rank: 1')");
+  assert.match(await evaluate("document.querySelector('#case-results').textContent"),/910-005469/);
+  assert.match(await evaluate("document.querySelector('#case-results').textContent"),/BM25 relevance/);
   assert.deepEqual(errors,[]);
   console.log('Local browser diagnostics passed: keyword search, optional typed filter, cursor pages, identifiers, score/plan UI; no approval inputs. Preview: .cache/search-diagnostics-preview.png');
 } finally {

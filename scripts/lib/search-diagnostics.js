@@ -8,7 +8,7 @@ const json=(body,status=200)=>new Response(JSON.stringify(body),{status,headers:
 
 // Local administrative tool only. Reuse the real API's validation, filters and
 // pagination; diagnostic SELECT/EXPLAIN statements never write catalog/reviews.
-export function createSearchDiagnostics({db,epoch='local-diagnostics'}) {
+export function createSearchDiagnostics({db,cases,epoch='local-diagnostics'}) {
   return async request=>{
     const url=new URL(request.url);
     if(request.headers.has('origin')&&request.headers.get('origin')!==url.origin)return json({error:{message:'Local origin required'}},403);
@@ -16,6 +16,15 @@ export function createSearchDiagnostics({db,epoch='local-diagnostics'}) {
     if(url.pathname==='/api/categories'&&request.method==='GET')return json({categories:Object.entries(models).map(([category,model])=>({
       category,fields:{name:'TEXT',manufacturer:'TEXT',series:'TEXT',variant:'TEXT',release_year:'INTEGER',...model.fields},facets:model.facets,
     }))});
+    if(url.pathname==='/api/cases'&&request.method==='GET') {
+      try {
+        if(!cases)return json({cases:[]});
+        const id=url.searchParams.get('id');
+        if(id===null)return json({cases:await cases()});
+        const result=await cases(id);
+        return result?json(result):json({error:{message:'Unknown case ID'}},404);
+      }catch{return json({error:{message:'Source snapshot / catalogが一致するローカルDBで再実行してください。'}},500);}
+    }
     const search=url.pathname==='/api/search'&&request.method==='POST';
     const detail=/^\/api\/products\/[1-9]\d*$/.test(url.pathname)&&request.method==='GET';
     if(!search&&!detail)return json({error:{message:'Not found'}},404);

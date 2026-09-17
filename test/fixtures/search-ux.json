@@ -1,4 +1,7 @@
 [
+  {"id":"ux-dt990-pro250","category":"headphones","intent":"lookup","class":"compact_model","query":"DT990 Pro 250","expected":{"upstream_key":"Headphones/eb851535-44b4-417f-bbba-5a0966e0c691"}},
+  {"id":"ux-meshify","category":"case","intent":"browse","query":"Meshify","relevant":{"set":{"nameTokens":["Meshify"]}}},
+  {"id":"ux-trident","category":"memory","intent":"browse","query":"Trident","relevant":{"set":{"nameTokens":["Trident"]}}},
   {"id":"ux-mag","category":"motherboard","intent":"browse","query":"MAG","relevant":{"set":{"nameTokens":["MAG"]}}},
   {"id":"ux-rog","category":"motherboard","intent":"browse","query":"ROG","relevant":{"set":{"nameTokens":["ROG"]}}},
   {"id":"ux-vengeance","category":"memory","intent":"browse","query":"Vengeance","relevant":{"set":{"nameTokens":["Vengeance"]}}},

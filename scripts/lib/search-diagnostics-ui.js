@@ -81,6 +81,34 @@ export function mountSearchDiagnostics() {
   $('add-filter').onclick=addFilter;
   $('category').onchange=()=>{$('filters').innerHTML='';reset();};
   $('next').onclick=()=>void run(true);
+  const productEvidence=p=>`<article><div class="product"><h2>${p.rank?`${esc(p.rank)}. `:''}${esc(p.name)} ${p.fixture_expected?'★ fixture expected':p.source_relevant?'★ relevant / source equivalent':''}</h2>
+    <p>${esc(p.manufacturer)} · ${esc(p.series)} · ${esc(p.variant)}</p><p class="muted">${esc(p.source)} / ${esc(p.upstream_key)}</p>
+    ${p.rank?`<p>match: ${esc(p.match_type)} / final score: ${esc(p.final_score)} / BM25 relevance (-bm25): ${esc(p.bm25_relevance)}</p>`:''}
+    <p>${(p.identifiers??[]).map(i=>`${esc(i.type)}: ${esc(i.value)}`).join(' / ')}</p>
+    <details><summary>spec / relevant判定のsource条件</summary><pre>${esc(JSON.stringify({spec:p.spec,source_condition:p.source_condition,source_relevant:p.source_relevant,source_filters_match:p.source_filters_match},null,2))}</pre></details></div></article>`;
+  async function loadCase() {
+    const id=$('case-id').value.trim();if(!id)return;
+    $('case-load').disabled=true;$('case-results').textContent='source / 候補集合を診断中…';
+    try {
+      const r=await request(`/api/cases?id=${encodeURIComponent(id)}`);
+      const pct=v=>Number.isFinite(v)?`${(v*100).toFixed(2)}%`:'—';
+      const group=(label,products)=>`<details><summary>${esc(label)} (${products.length})</summary>${products.map(productEvidence).join('')||'<p>なし</p>'}</details>`;
+      $('case-results').innerHTML=`<h2>Case: ${esc(r.id)}</h2><p>Query: ${esc(r.query??'(filter only)')} / Intent: ${esc(r.intent)} / Category: ${esc(r.category)}</p>
+        ${r.classification?`<p>Baseline classification: ${esc(r.classification)} / ${esc(r.reason)}<br>Action: ${esc(r.proposed_action)}</p>`:''}
+        ${r.required?`<p>Required: ${esc(r.required)} / Actual rank: ${esc(r.rank??'not found')}</p>`:`<p>Expected ${r.relevant_count} / Returned relevant ${r.relevant_returned.length} / Returned candidates ${r.returned}<br>Coverage ${pct(r.relevant_coverage)} / Precision ${pct(r.precision)} / FP ${r.false_positive_count} / FN ${r.false_negative_count}</p>`}
+        <p>${r.window_exhausted?'Window exhausted: further filtering required':'Window exhausted: false'} / rows_read ${esc(r.rows_read)} / SQL ${esc(r.sql_duration_ms)}ms / catalog full scan ${esc(r.catalog_full_scan)}</p>
+        <p>${esc(r.failures.join('; ')||'自動quality条件: pass')}</p><pre>${esc(JSON.stringify(r.search??{},null,2))}</pre>
+        ${r.required?group('Expected product / source equivalents',r.expected_products)+`<h3>Top 10（最大10件）</h3>${r.top_results.map(productEvidence).join('')}`:
+          group('Relevant returned',r.relevant_returned)+group('False positives',r.false_positives)+`<section><h3>False negatives (${r.false_negatives.length})</h3>${r.false_negatives.map(productEvidence).join('')||'<p>なし</p>'}</section>`}
+        <details><summary>Missing trace（最大${r.trace_limit}件）/ query plan</summary><pre>${esc(JSON.stringify(r.missing_traces,null,2))}</pre><pre>${esc(r.query_plan.join('\n'))}</pre></details>
+        <p class="muted">Source snapshot: ${esc(r.source_snapshot_commit)} / ${esc(r.cost_scope)}</p>`;
+    }catch(error){$('case-results').textContent=error.message;}finally{$('case-load').disabled=false;}
+  }
+  $('case-load').onclick=()=>void loadCase();
+  request('/api/cases').then(body=>{
+    $('case-options').innerHTML=body.cases.map(r=>`<option value="${esc(r.id)}">${esc(r.intent)} / ${esc(r.query)}</option>`).join('');
+    const id=new URL(location.href).searchParams.get('case');if(id){$('case-id').value=id;void loadCase();}
+  }).catch(error=>{$('case-results').textContent=error.message;});
   request('/api/categories').then(body=>{
     categories=body.categories;
     $('category').innerHTML=categories.map(c=>`<option value="${esc(c.category)}">${esc(labels[c.category]??c.category)}</option>`).join('');
@@ -93,6 +121,7 @@ export function renderSearchDiagnostics() {
   <style>
     :root{font:16px/1.6 system-ui,"Yu Gothic UI",sans-serif;color:#203247;background:#f3f6fa;color-scheme:light}*{box-sizing:border-box}body{max-width:1000px;margin:auto;padding:28px 20px}h1{font-size:25px;margin-bottom:4px}header p{margin:0 0 22px;color:#586b83}button,input,select{font:inherit;border:1px solid #b6c7da;border-radius:6px;padding:9px 12px}button{cursor:pointer;background:white}button:disabled{opacity:.6;cursor:wait}button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #3b82f6;outline-offset:2px}.primary{background:#1858ac;color:white;border-color:#1858ac}form{background:white;padding:20px;border:1px solid #dce4ee;border-radius:10px}.search-row{display:flex;gap:12px;align-items:end}.search-row label{display:flex;flex-direction:column;font-size:13px;gap:4px}.keyword{flex:1}input{min-width:0}details{margin-top:14px}summary{cursor:pointer;color:#1858ac}.filter-row{display:flex;gap:8px;margin:10px 0}.filter-row input{flex:1}#add-filter{margin-top:10px}#message{color:#994126}#summary{font-weight:600}article{display:flex;gap:16px;background:white;border:1px solid #dce4ee;border-radius:8px;padding:18px;margin:12px 0}.number{color:#61758f;font-size:20px;min-width:25px}.product{min-width:0;flex:1}h2{font-size:18px;margin:0}p{margin:6px 0}.muted{color:#61758f;font-size:13px;overflow-wrap:anywhere}table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}td,th{text-align:left;padding:6px;border-bottom:1px solid #dce4ee;overflow-wrap:anywhere}th{font-weight:500;color:#61758f}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}#diagnostics{background:#e9eff7;padding:14px;border-radius:8px}footer{margin-top:30px;color:#61758f;font-size:13px}.empty{padding:30px;background:white}#next{display:block;margin:20px auto}[hidden]{display:none!important}@media(max-width:650px){.search-row{flex-wrap:wrap}.keyword{min-width:60%}.filter-row{flex-wrap:wrap}.filter-row input{width:100%}body{padding:16px}}
   </style></head><body><header><h1>ローカル検索チェック</h1><p>気になった検索を、ここで試せます。確認・承認の作業はありません。</p></header>
+  <section aria-label="Failure診断"><label>Case ID <input id="case-id" list="case-options" placeholder="p2-storage-sata1tb"></label><datalist id="case-options"></datalist><button id="case-load" type="button">Caseを診断</button><div id="case-results" aria-live="polite"></div></section>
   <form id="form"><div class="search-row"><label>カテゴリ<select id="category" aria-label="カテゴリ"></select></label>
     <label class="keyword">検索語<input id="keyword" placeholder="例: 9800X3D、MAG、SN850X" autocomplete="off"></label><button id="search" class="primary" disabled>検索</button></div>
     <details><summary>絞り込み条件（任意）</summary><div id="filters"></div><button id="add-filter" type="button">条件を追加</button><p class="muted">文字列は一致、数値は一致・以上・以下で絞れます。検索語を空にすると一覧を確認できます。</p></details></form>

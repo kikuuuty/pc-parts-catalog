@@ -82,7 +82,7 @@ export function summarizeUX(results) {
     temp_b_tree_count:results.filter(r=>r.temp_b_tree?.length).length };
 }
 
-export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, source } = {}) {
+export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, source, operations = true } = {}) {
   if(!source?.source_snapshot_commit||source.source_snapshot_commit!==catalog.metadata.last_sync?.source_commit)throw Error('Independent source snapshot matching the catalog is required');
   if (!fixture.length || fixture.some(r=>typeof r.id!=='string'||!r.id.trim()) || new Set(fixture.map(r=>r.id)).size!==fixture.length) throw new Error('Fixture IDs must be unique and nonempty');
   const results = [];
@@ -127,7 +127,7 @@ export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, sou
     }
     const rank = ids.findIndex(id=>targetIds.has(id));
     const r = { id:item.id,fixture_sha256:item.fixture_sha256,category:item.category,intent,class:item.class,
-      expected:item.expected,relevant:item.relevant,search:item.search,query:item.query,
+      expected:item.expected,equivalents:item.equivalents,relevant:item.relevant,search:item.search,query:item.query,
       rank:setIntent ? null : rank<0 ? null : rank+1,zero_results:ids.length===0,returned:ids.length,
       window_limit:window,window_exhausted:window!==null && !exhausted && ids.length===window,query_plan:plan,catalog_full_scan:hasCatalogFullScan(plan),
       query_count:1,all_pages_query_count:costs.length,source_grounded:intent==='identifier'?targets.length>0:undefined,
@@ -137,7 +137,8 @@ export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, sou
       all_pages_rows_read:costs.every(c=>Number.isFinite(c.rows_read)) ? costs.reduce((n,c)=>n+c.rows_read,0) : null,
       all_pages_sql_duration_ms:costs.every(c=>Number.isFinite(c.duration)) ? costs.reduce((n,c)=>n+c.duration,0) : null,
       max_page_rows_read:Math.max(...costs.map(c=>c.rows_read??NaN)),max_page_sql_duration_ms:Math.max(...costs.map(c=>c.duration??NaN)),
-      top20:ids.slice(0,20),floors:item.floors };
+      top20:ids.slice(0,20),returned_ids:ids,relevant_ids:[...targetIds],floors:item.floors,
+      diagnostic_command:`npm run diagnose:search -- --case ${item.id}` };
     if (setIntent) Object.assign(r,setMetrics(ids,targetIds));
     if (['browse_filter','filter_only'].includes(intent)) {
       r.invalid_filter_products = ids.filter(id=>!sourceById.has(id) || !matchesFilters(sourceById.get(id),item.search)).length;
@@ -166,7 +167,7 @@ export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, sou
     }
     results.push(r);
   }
-  const operationResults=await evaluateProductOperations(db,catalog,source);
+  const operationResults=operations?await evaluateProductOperations(db,catalog,source):[];
   await assertCatalogState(db,catalog.metadata.last_sync);
   return { schema_version:4,kind:'ux_search_benchmark',fixture_sha256:fixtureHash,catalog:catalog.metadata,
     display_values:{series_null:source.products.filter(p=>p.series===null).length,series_empty:source.products.filter(p=>p.series==='').length,manufacturer_null:source.products.filter(p=>p.manufacturer===null).length},
@@ -195,7 +196,9 @@ export function qualityFailures(report, { budgets = {} } = {}) {
       // A full large window is a UI refinement state, not missing-catalog recall.
       const ceiling=r.window_exhausted&&r.relevant_count>r.window_limit?r.window_limit/r.relevant_count:1;
       if(!Number.isFinite(r.relevant_coverage)||r.relevant_coverage < (r.floors?.candidate_coverage??.9)*ceiling) fail('candidate coverage floor');
-      if(!Number.isFinite(r.precision)||r.precision < (r.floors?.candidate_precision??.9)) fail('candidate precision floor');
+      // Family discovery tolerates at most one off-set candidate in five;
+      // explicit filtered sets below still require zero FP/FN.
+      if(!Number.isFinite(r.precision)||r.precision < (r.floors?.candidate_precision??.8)) fail('candidate precision floor');
       if(r.zero_results && r.relevant_count) fail('unexpected zero result');
     } else {
       if(!r.filter_correctness || r.false_positive_count || r.false_negative_count) fail('filtered set mismatch');

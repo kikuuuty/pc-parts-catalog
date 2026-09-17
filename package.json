@@ -20,6 +20,7 @@
     "benchmark:ux": "node scripts/benchmark-ux.js",
     "verify:ux:local": "node scripts/verify-ux-api-local.js",
     "diagnose:search": "node scripts/search-diagnostics.js",
+    "analyze:search": "node scripts/analyze-search-failures.js",
     "measure:sync:local": "node scripts/measure-sync-cost.js",
     "golden:extended:check": "node scripts/prepare-extended-golden.js",
     "worker:dev": "wrangler dev --local --env local --persist-to .wrangler/state",
