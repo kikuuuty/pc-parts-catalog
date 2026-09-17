@@ -31,14 +31,34 @@ to product BM25 statistics. All candidate paths apply category/active/typed scop
 
 `searchQuery` retrieves candidates with category FTS and indexed typed/identifier
 paths. Existing bounded model expansion and debug scores remain available.
-`orderBy: relevance` uses ranking; `manufacturer`, `series`, `name` and typed field
-ordering use the same retrieved/filtered set with an ID tiebreaker. Price belongs
+FTS/BM25 = candidate retrieval; display ordering = a separate concern.
+Keyword-free default order is manufacturer → series (NULLS LAST) → name → id,
+ascending with SQLite NOCASE text comparison. Keyword order is relevance first,
+then that same deterministic tuple. Explicit allowlisted typed sorts apply only
+to keyword-free searches. Price belongs
 to a future Provider-backed presentation layer, not a fabricated catalog value.
 
 Browse evaluation measures relevant sets, not a single expected product's rank.
 Explicit UI filters are strict; specification words interpreted from free text
 remain soft retrieval/ranking hints. Clients should submit typed filters after
 facet selection rather than concatenate them into the keyword.
+
+Keyword candidates retain the bounded 1000-result OFFSET window. Keyword-free
+lists use cursor/keyset pagination with no total window. `meta.next_cursor` and
+`has_more` support selection across pages; keyword `window_exhausted` asks the
+frontend for more filters. See [pagination](pagination.md).
+
+```text
+category-specific FTS → candidates → typed filters / facets
+→ deterministic display ordering → pagination → frontend selection
+→ Product Detail → identifiers → price Provider
+
+saved/shared build → source + upstream_key → batch resolve → current product
+```
+
+Numeric id is the current DB runtime lookup key. `source + upstream_key` is the
+durable shared reference. [Batch resolve](product-reference.md) restores saved
+selections even when numeric IDs change, distinguishing inactive and missing.
 
 ## Migration 0008
 
@@ -64,6 +84,9 @@ well below the D1 100KB statement limit. No trigger contains all 30 category
 spec/FTS branches. Generator enforces a 50KB budget.
 
 ## Integrity and operational boundaries
+
+Migration `0009_display_order.sql` adds the category/active display-order index;
+it changes no FTS schema, normalizer or existing migration history.
 
 For every active product: one document in its category FTS, none in the other 29.
 Inactive/deleted products have none. Audits report missing, duplicate, wrong

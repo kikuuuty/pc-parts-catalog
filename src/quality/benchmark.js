@@ -163,8 +163,8 @@ export async function benchmarkSearch(db, catalog, fixture, { category, suite, q
     let offset = 0;
     const started = performance.now();
     // Append only pagination to the real generated SQL; predicates and ordering stay intact.
-    // Exhaust all pages when necessary: absence from the first 100 is NOT NO_SEARCH_MATCH.
-    while (true) {
+    // Diagnostic ranking is bounded by the same keyword window as the UI.
+    while (offset < 1000) {
       // When the real query already uses all 100 D1 binds, emit the internally
       // counted integer offset as a literal rather than creating a 101st bind.
       const bindOffset = query.params.length < 100;

@@ -1,7 +1,7 @@
 import { models } from './model.js';
 import { CACHE_SCHEMA_GENERATION, searchCachePolicy } from './search-cache.js';
 
-export const detailProductQuery = { sql: `SELECT id,upstream_id,upstream_key,category,manufacturer,name,series,variant,release_year,manufacturer_url FROM products WHERE id=? AND active=1` };
+export const detailProductQuery = { sql: `SELECT id,source,upstream_id,upstream_key,category,manufacturer,name,series,variant,release_year,manufacturer_url FROM products WHERE id=? AND active=1` };
 export function detailQueries(category) {
   if (!Object.hasOwn(models, category)) throw new Error('Unknown category');
   return {

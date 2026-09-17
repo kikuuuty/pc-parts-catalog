@@ -14,10 +14,12 @@ export function assertSearchContract(body, { category, limit = 20, offset = 0 })
   assert(m.returned >= 0 && m.returned <= limit);
   assert.equal(typeof m.has_more, 'boolean');
   if (m.has_more) assert.equal(m.returned, limit);
-  assert([1000,100000].includes(m.window_limit));
-  const next = m.has_more && offset + limit * 2 <= m.window_limit ? offset + limit : null;
+  assert([1000,null].includes(m.window_limit));
+  const next = m.window_limit!==null && m.has_more && offset + limit < m.window_limit ? offset + limit : null;
   assert.equal(m.next_offset, next);
-  assert.equal(m.window_exhausted, m.has_more && next === null);
+  assert.equal(m.window_exhausted, m.window_limit!==null && m.has_more && next === null);
+  assert(m.next_cursor===null || typeof m.next_cursor==='string');
+  if(m.window_limit===null) assert.equal(m.next_cursor!==null,m.has_more);
   assert.equal(m.source.name, 'BuildCores OpenDB');
   assert.equal(m.source.url, 'https://github.com/buildcores/buildcores-open-db');
   assert.equal(m.source.license, 'ODC-By 1.0');
@@ -26,6 +28,7 @@ export function assertSearchContract(body, { category, limit = 20, offset = 0 })
   const ids = new Set();
   for (const p of body.data) {
     assert(Number.isSafeInteger(p.id) && p.id > 0);
+    assert.equal(typeof p.source,'string');
     assert.match(p.upstream_id, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i);
     assert.equal(p.upstream_key.split('/')[1], p.upstream_id);
     assert(p.upstream_key.split('/')[0].length > 0);

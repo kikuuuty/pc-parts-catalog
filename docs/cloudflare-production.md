@@ -1,7 +1,8 @@
 # Cloudflare D1 / Worker API
 
 This document describes the current checkout. Category FTS generation 8 and
-Product Detail have been validated locally; production activation is a separate
+Product Detail, cursor pagination and batch reference resolve have been validated
+locally; production activation is a separate
 phase. Historical remote measurements are in `production-*-baseline.md`,
 `production-cache.md` and `production-rate-limiting.md`; they are not current
 quality floors. See [release gates](catalog-release.md) before production changes.
@@ -49,16 +50,18 @@ the new endpoints/schema require a future release. For this phase use local dev.
 |---|---|
 |GET `/v1/health`|`{ok:true,database:"available"}`|
 |GET `/v1/categories`|`{categories:[...]}` from the 30-category registry|
-|GET `/v1/search`|category required; q/limit/offset optional|
-|POST `/v1/search`|JSON category, keyword, filters, ranges, facets, identifier, orderBy, limit, offset, include|
+|GET `/v1/search`|category required; q/limit/offset/cursor optional|
+|POST `/v1/search`|JSON category, keyword, filters, ranges, facets, identifier, orderBy, limit, offset, cursor, include|
 |GET `/v1/products/:id`|[Product Detail](product-detail.md): identifiers, typed spec, facets|
+|POST `/v1/products/resolve`|[Stable refs](product-reference.md): 1–64 products → current IDs and active/inactive/missing|
 
-Search returns `{data:[...],meta:{limit,offset,returned,has_more,next_offset,
-window_limit,window_exhausted,source}}`. Data includes stable numeric `id`,
-`upstream_key`, `upstream_id`, category/name/manufacturer/series/variant,
+Search returns `{data:[...],meta:{limit,offset,returned,has_more,next_offset,next_cursor,
+window_limit,window_exhausted,source}}`. Data includes current runtime numeric `id`,
+`source`, `upstream_key`, `upstream_id`, category/name/manufacturer/series/variant,
 release_year/manufacturer_url and `specs`. Unknown fields are null.
 UUID alone is not a cross-category identity. Use the search `id` for Detail.
-For exports/source references retain `upstream_key` as well.
+For shared URLs/saved builds/exports use `source + upstream_key` as the durable
+reference, then batch resolve before requesting Detail/price data.
 
 Normal search does not load identifiers. POST can request
 `include:["identifiers","facets"]`; its existing expansion remains compatible.
@@ -71,13 +74,17 @@ Provider decide MPN/EAN/UPC/name priority.
   registry's TEXT/number type. Ranges are inclusive. Facets preserve multi-values.
 - Explicit filters are strict. Words such as `32gb` parsed from a keyword are
   soft spec hints and do not assert that every result has that capacity.
-- `orderBy` accepts relevance, name/manufacturer/series and allowlisted typed
-  fields. Product ID is the deterministic tie-breaker. No price column exists.
-- Default limit 20, max 50. Keyword window 1,000; keyword-free filter/list window
-  100,000, allowing all matches in the reviewed catalog envelope.
-- Use `meta.next_offset`, not inferred page counts. `returned` is not total hits.
+- Keyword-free default is manufacturer → series NULLS LAST → name → id ASC
+  (NOCASE text). Explicit allowlisted `orderBy` prepends that field, NULLS LAST.
+  Keyword always uses relevance first, then the default display tuple.
+- Default limit 20, max 50. Keyword window 1,000; keyword-free filter/list uses
+  cursor/keyset with no total window. Nonzero keyword-free OFFSET returns 400.
+- Use `meta.next_cursor` for keyword-free pages, `next_offset` for keyword pages.
+  `returned` is not total hits. Cursor permits changed page size, requires the
+  same category/filter/order/epoch and safely rejects invalid context with 400.
   At the explicit window boundary `has_more` can be true with null next_offset.
-- GET supports only category/q/limit/offset. Use POST for advanced filters/sort.
+- GET supports category/q/limit/offset/cursor. Use POST for advanced filters/sort.
+  See [cursor format and consistency](pagination.md).
 
 ### Input and errors
 
@@ -100,6 +107,8 @@ GET search's first six standard pages use Cache API TTL 60/300/600 (default 300)
 Detail has its own namespace and 600s TTL. Epoch invalidates both; HIT executes
 no D1 query. POST search bypasses cache. Cache failures use the normal protected
 DB path; 404 and errors are not cached.
+Cursor requests and batch resolve bypass edge cache. The keyword-free first
+GET page can still cache. Search and Detail namespace generation is v3.
 
 Existing rate/refill protection runs after HIT detection and before D1. No public
 bypass/header is introduced. `X-Cache`, `X-Cache-TTL`, `Age`, `Server-Timing`,
@@ -114,7 +123,7 @@ Display `meta.source` attribution from search in the frontend. Preserve
 
 Production migration is manually reviewed and separately applied; release checks
 the exact migration history before sync/deploy. The new Worker cannot run on a
-pre-0008 database. Coordinate migration and Worker activation because the
+pre-0009 database. Coordinate migration and Worker activation because the
 previous Worker references removed indexes. No automatic backward-compatible
 routing or destructive rollback is provided.
 

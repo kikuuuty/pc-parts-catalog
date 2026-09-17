@@ -6,7 +6,7 @@ import { models, initialCategories, ftsName } from '../src/model.js';
 import { normalize } from '../src/normalize.js';
 import { categoryCoverage, assertModelSchema } from '../src/upstream.js';
 import { syncSnapshot } from '../src/sync.js';
-import { searchQuery } from '../src/queries.js';
+import { searchQuery, hasCatalogFullScan } from '../src/queries.js';
 import { addLocalIdentifier, setLocalEnrichment } from '../src/enrichment.js';
 import { extendedCases } from '../test-support/extended-cases.js';
 import { createWorker } from '../src/worker.js';
@@ -91,7 +91,8 @@ test('new indexed range ordering starts with typed index before facet/product lo
   const q = searchQuery('keyboard', { ranges: { polling_rate_hz: { min: 1000 } }, facets: { connectivity: 'Bluetooth' }, orderBy: 'polling_rate_hz' });
   const details = (await db.query(`EXPLAIN QUERY PLAN ${q.sql}`, q.params)).results.map(r => r.detail);
   assert(details.some(d => d.includes('keyboard_polling')));
-  assert(!details.some(d => d.includes('TEMP B-TREE FOR ORDER BY')));
+  // Deterministic product display tie-breaks may sort the indexed candidate set.
+  assert(!hasCatalogFullScan(details));
   assert.equal((await db.query(q.sql, q.params)).results.length, 1);
 });
 
@@ -188,9 +189,9 @@ for (const category of extra) test(`${category}: ingest, common/identifier/FTS, 
   for (const include of [true, ['raw'], ['identifiers', 'identifiers'], 'identifiers']) assert.equal((await request('/v1/search', { ...base, include })).status, 400);
   const firstPage = await (await request(`/v1/search?category=${category}&limit=1`)).json();
   assertSearchContract(firstPage, { category, limit: 1 });
-  assert.equal(firstPage.meta.next_offset, 1);
-  const secondPage = await (await request(`/v1/search?category=${category}&limit=1&offset=1`)).json();
-  assertSearchContract(secondPage, { category, limit: 1, offset: 1 });
+  assert.equal(firstPage.meta.next_offset, null);
+  const secondPage = await (await request(`/v1/search?category=${category}&limit=1&cursor=${firstPage.meta.next_cursor}`)).json();
+  assertSearchContract(secondPage, { category, limit: 1 });
   assert.notEqual(firstPage.data[0].id, secondPage.data[0].id);
   assert.equal(secondPage.meta.has_more, false);
 });

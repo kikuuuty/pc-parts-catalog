@@ -45,7 +45,7 @@ test('retry reuses completed sync only after comparing DB hashes; partial and fa
   assert.equal(repeat.updated, 0);
   assert.equal(repeat.unchanged, 1);
   assert.equal((await db.query('SELECT count(*) AS n FROM sync_runs')).results[0].n, 1);
-  assert.equal(cacheEpoch(await catalogState(db)), `sync-${first.run_id}-fts${FTS_GENERATION}-cache2`);
+  assert.equal(cacheEpoch(await catalogState(db)), `sync-${first.run_id}-fts${FTS_GENERATION}-cache3`);
   db.sqlite.exec("UPDATE products SET content_hash='interrupted-write'");
   const resumed = await syncSnapshot(db, snapshot, { reuseComplete: true });
   assert.notEqual(resumed.run_id, first.run_id);
@@ -92,7 +92,7 @@ test('epoch tracks snapshot/projection/cache generations, not workflow attempts'
   const sync = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', status: 'complete' };
   assert.equal(cacheEpoch(sync), cacheEpoch({ ...sync, attempt: 99 }));
   assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION + 1));
-  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION, 'v3'));
+  assert.notEqual(cacheEpoch(sync), cacheEpoch(sync, FTS_GENERATION, 'v4'));
   assert.throws(() => cacheEpoch({ ...sync, status: 'partial' }));
 });
 
@@ -106,16 +106,17 @@ test('production config rejects mismatched remote overrides, retains TTL and che
   assert.throws(() => assertDeployedVars({ bindings: bindings.slice(1) }, config.vars));
 });
 
-test('UX gate rejects identifier errors, contamination, review debt and missing coverage, not browse rank movement', () => {
+test('UX gate rejects machine quality errors, not human review status or browse rank movement', () => {
   const report = { results: ['lookup','identifier','browse','browse_filter','filter_only'].map(intent => ({ id:intent,intent,rank:1,
-    rows_read:100,sql_duration_ms:1,relevant_count:5,recall_at_20:1,precision_at_20:1,filter_correctness:true,
-    exact_set_equality:true,pagination_correctness:true })) };
+    review:'reviewed',source_grounded:true,rows_read:100,sql_duration_ms:1,relevant_count:5,relevant_coverage:1,precision:1,filter_correctness:true,
+    exact_set_equality:true,pagination_correctness:true,stable_ordering:true })) };
   assertGolden(report);
   report.results[2].rank=999; assertGolden(report);
-  for (const [index,change] of [[1,{rank:2}],[2,{precision_at_20:.5}],[3,{false_positive_count:1}],[4,{pagination_correctness:false}],[0,{review:'pending'}]]) {
+  for (const [index,change] of [[1,{rank:2}],[2,{precision:.5}],[3,{false_positive_count:1}],[4,{pagination_correctness:false}]]) {
     const bad = structuredClone(report); Object.assign(bad.results[index], change);
     assert.throws(() => assertGolden(bad));
   }
+  for(const review of ['pending','needs_changes','unsure',undefined]) {report.results[0].review=review;assertGolden(report);}
   assert.throws(() => assertGolden({results:[]}));
 });
 

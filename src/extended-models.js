@@ -11,7 +11,7 @@ const valueAt = (data, source) => source.split('.').reduce((v, key) => v?.[key],
 function define(upstream, label, table, scalars = {}, arrays = {}, indexes = {}, extra) {
   return {
     upstream, label, table, fields: Object.fromEntries(Object.entries(scalars).map(([key, [, type]]) => [key, type])),
-    indexes, facets: Object.keys(arrays), searchFields: [], indexedOrderFirst: true,
+    indexes, facets: Object.keys(arrays), searchFields: [],
     // Retain the source mappings for schema conformance checks and documentation.
     scalarSources: Object.fromEntries(Object.entries(scalars).map(([key, [source]]) => [key, source])),
     facetSources: arrays,

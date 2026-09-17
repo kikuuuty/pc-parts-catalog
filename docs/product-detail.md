@@ -9,6 +9,7 @@ Illustrative response; identifier values below are examples, not verified codes:
 ```json
 {
   "id": 12345,
+  "source": "buildcores",
   "upstream_id": "00000000-0000-4000-8000-000000000001",
   "upstream_key": "Motherboard/00000000-0000-4000-8000-000000000001",
   "category": "motherboard",
@@ -72,15 +73,18 @@ No single `price_search_code` is selected by the backend. For example:
 ## IDs, performance and cache
 
 Numeric IDs remain stable during sync, update, inactivity and reactivation.
-Migration 0008 prevents recycling an ID after hard deletion. `upstream_key` is
-also exposed for source identity and exports; rebuilding a separate empty DB is
-not an ID-preserving production migration.
+Migration 0008 prevents recycling an ID after hard deletion. Nevertheless,
+**numeric id = current DB/runtime lookup; source + upstream_key = durable shared
+reference**. Search and Detail both always include source and upstream_key.
+Shared URLs, favorites, saved builds, localStorage and exports store the pair,
+then call [POST /v1/products/resolve](product-reference.md) to restore current IDs
+and active/inactive/missing status. A fresh database import can assign new IDs.
 
 Four bounded reads use product PK, spec PK, identifier product_id-leading unique
 indexes, and facet PK. All 30 categories have query-plan tests. No catalog scan
 or full identifier/facet scan is needed.
 
-Cache API keys use `/__catalog_cache/product/v2/:id`, origin, catalog epoch and
+Cache API keys use `/__catalog_cache/product/v3/:id`, origin, catalog epoch and
 TTL=600 seconds. Search retains its own namespace and 60/300/600 policy.
 The shared epoch invalidates both on a completed catalog release. Missing/invalid
 epoch bypasses cache. Only 200 JSON bodies are cached; no 404/error/request IDs

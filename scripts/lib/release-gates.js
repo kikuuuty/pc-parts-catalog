@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { remoteDatabaseId } from '../../src/remote-config.js';
@@ -80,7 +80,7 @@ export async function readiness(db, { commit, expectedCounts } = {}) {
   assert(integrity.pass, 'Category FTS integrity failed');
   assert.equal((await db.query('SELECT count(*) AS n FROM products p LEFT JOIN upstream_raw r ON r.product_id=p.id WHERE r.product_id IS NULL')).results[0].n, 0, 'Missing upstream raw');
   await assertCatalogState(db, sync);
-  return { sync, active, counts, cache_epoch: cacheEpoch(sync) };
+  return { sync, active, counts, fts:integrity, cache_epoch: cacheEpoch(sync) };
 }
 
 // Intent-specific floors, not exact rank/fingerprint invariance.
@@ -89,14 +89,20 @@ export function assertGolden(report) {
 }
 export async function searchGate(db) {
   const plans = await verifyPlans(db);
-  assert(plans.length > 0 && plans.every(r => r.index_check), 'Query plan gate failed');
   const catalog = await loadQualityCatalog(db);
   const { fixture, hash } = await loadUXFixture();
   const snapshot=await loadSnapshot();
   assert.equal(snapshot.commit,catalog.metadata.last_sync?.source_commit,'Evaluation snapshot differs');
-  assert((await verifySourceCatalog(db,catalog,snapshot)).pass,'Source catalog integrity failed');
+  const sourceIntegrity=await verifySourceCatalog(db,catalog,snapshot);
+  assert(sourceIntegrity.pass,'Source catalog integrity failed');
   const report = await evaluateUX(db, catalog, fixture, { fixtureHash: hash,source:sourceCatalog(snapshot,catalog) });
-  assertGolden(report);
+  const budgets=process.env.PERFORMANCE_BUDGET_FILE?JSON.parse(await readFile(process.env.PERFORMANCE_BUDGET_FILE,'utf8')):{};
+  report.release_failures=qualityFailures(report,{budgets});
+  report.source_integrity=sourceIntegrity;
+  report.plans=plans;
+  await writeFile('.cache/release-ux-report.json',JSON.stringify(report,null,2)+'\n');
+  assert(plans.length > 0 && plans.every(r => r.index_check), 'Query plan gate failed');
+  assert.deepEqual(report.release_failures,[],'UX release gate failed');
   return { golden: report.by_intent, plans: plans.length };
 }
 

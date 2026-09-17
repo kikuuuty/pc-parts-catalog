@@ -1,0 +1,12 @@
+{
+  "p2-storage-990-2tb":{"intent":"browse_filter","query":"990 pro","search":{"filters":{"capacity_gb":2000,"manufacturer":"Samsung"}},"relevant":{"set":{"nameContains":["990 Pro"]}}},
+  "p2-storage-sn850-2tb":{"intent":"browse_filter","query":"sn850x","search":{"filters":{"capacity_gb":2000}},"relevant":{"set":{"nameContains":["SN850X"]}}},
+  "p2-storage-sn850-4tb":{"intent":"browse_filter","query":"sn850x","search":{"filters":{"capacity_gb":4000}},"relevant":{"set":{"nameContains":["SN850X"]}}},
+  "p2-storage-990-1tb":{"intent":"browse_filter","query":"990 pro","search":{"filters":{"capacity_gb":1000,"manufacturer":"Samsung"}},"relevant":{"set":{"nameContains":["990 Pro"]}}},
+  "p2-storage-sata1tb":{"intent":"browse_filter","query":"sata","search":{"filters":{"capacity_gb":1000,"nvme":0,"storage_type":"SSD"}},"relevant":{"set":{"nameContains":["SATA"]}}},
+  "p2-board-b650e-wifi":{"intent":"browse_filter","query":"wifi","search":{"filters":{"chipset":"AMD B650E"}},"relevant":{"set":{"nameContains":["WIFI"]}}},
+  "p2-case-meshify":{"intent":"browse","query":"meshify c","relevant":{"set":{"nameContains":["Meshify C"]}}},
+  "p2-case-matx":{"intent":"filter_only","query":null,"search":{"filters":{"form_factor":["Micro ATX Mini Tower","Micro ATX Mid Tower"]}}},
+  "p2-case-itx":{"intent":"filter_only","query":null,"search":{"filters":{"form_factor":"Mini ITX Tower"}}},
+  "p2-cooler-freezer360":{"intent":"browse_filter","query":"liquid freezer","search":{"filters":{"water_cooled":1,"radiator_size_mm":360}},"relevant":{"set":{"nameContains":["Liquid Freezer"]}}}
+}

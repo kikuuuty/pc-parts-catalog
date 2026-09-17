@@ -18,6 +18,8 @@
     "benchmark:search": "node src/cli.js benchmark-search",
     "verify:search:local": "node scripts/verify-search-local.js",
     "benchmark:ux": "node scripts/benchmark-ux.js",
+    "verify:ux:local": "node scripts/verify-ux-api-local.js",
+    "diagnose:search": "node scripts/search-diagnostics.js",
     "measure:sync:local": "node scripts/measure-sync-cost.js",
     "golden:extended:check": "node scripts/prepare-extended-golden.js",
     "worker:dev": "wrangler dev --local --env local --persist-to .wrangler/state",

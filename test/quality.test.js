@@ -165,7 +165,7 @@ test('Hit@K, full MRR and classification have explicit denominators', () => {
 
 test('benchmark executes real searchQuery unchanged, finds rank >100, and distinguishes all failures', async t => {
   const db = database(); t.after(() => db.sqlite.close());
-  const records = Array.from({length:125},(_,i) => record('cpu',`Ranked CPU ${i+1}`));
+  const records = Array.from({length:125},(_,i) => record('cpu',`Ranked CPU ${String(i+1).padStart(3,'0')}`));
   await seed(db,records);
   const catalog = await loadQualityCatalog(db);
   db.sqlite.exec('PRAGMA query_only=ON');
@@ -220,7 +220,7 @@ test('benchmark exhausts matching pages before claiming NO_SEARCH_MATCH and resp
 
 test('diagnostic pagination also supports a real query at the D1 100-parameter ceiling', async t => {
   const db = database(); t.after(() => db.sqlite.close());
-  const records = Array.from({length:101},(_,i) => record('cpu',`Ranked ${i}`,{series:'Ryzen 7 9000',socket:'AM5',metadata:{variant:'test'}}));
+  const records = Array.from({length:101},(_,i) => record('cpu',`Ranked ${String(i).padStart(3,'0')}`,{series:'Ryzen 7 9000',socket:'AM5',metadata:{variant:'test'}}));
   await seed(db,records);
   const catalog = await loadQualityCatalog(db);
   const values = (value,n) => [value,...Array.from({length:n-1},(_,i) => `other-${i}`)];

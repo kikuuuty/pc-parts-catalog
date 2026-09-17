@@ -161,7 +161,7 @@ test('stable ties, explicit order, scoped identifier/facets and the 100-bind cei
   const rows = await search(db,'cpu_cooler','tower 1234');
   assert(rows[0].id < rows[1].id);
   assert.deepEqual(await search(db,'cpu_cooler','tower 1234'),rows);
-  assert.equal((await search(db,'cpu_cooler','tower 1234',{orderBy:'height_mm'}))[0].height_mm,150);
+  assert.deepEqual(await search(db,'cpu_cooler','tower 1234',{orderBy:'height_mm'}),rows);
   const scoped = {identifier:{type:'mpn',value:'COOL1234'},facets:{socket:'AM5'}};
   assert.equal((await search(db,'cpu_cooler','tower 1234',scoped)).length,1);
   const values = Array(20).fill('Example');

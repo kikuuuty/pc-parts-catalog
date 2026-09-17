@@ -107,7 +107,7 @@ test('freshness only adjusts CPU family matches: missing year is neutral and exa
   assert.equal(exact[0].name,'AMD Ryzen 7 1700X');
   assert(exact.every(r=>r.freshness_score===0));
   assert.deepEqual(await search(db,'cpu','ryzen 7'),rows);
-  assert.equal((await search(db,'cpu','ryzen 7',{orderBy:'release_year'}))[0].name,'AMD Ryzen 7 2700X');
+  assert.deepEqual(await search(db,'cpu','ryzen 7',{orderBy:'release_year'}),rows);
 });
 
 test('manufacturer fields and punctuation variants combine with specs without changing identifiers', async t => {

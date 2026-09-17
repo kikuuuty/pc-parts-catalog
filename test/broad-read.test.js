@@ -74,15 +74,15 @@ test('public and debug retrieval preserve candidate sets, NULLs, duplicate sourc
   }
 });
 
-test('explicit display ordering is deterministic with ID ties and preserves the 100-bind contract', async t => {
+test('keyword relevance remains primary despite orderBy and preserves the 100-bind contract', async t => {
   const db = await setup(t);
   for (const [category, keyword, orderBy] of [['cpu', '14900k', 'manufacturer'], ['cpu', 'ryzen 7', 'release_year'],
     ['memory', 'ddr5', 'capacity_gb'], ['gpu', 'rtx5080', 'length_mm']]) {
     const options = { keyword, orderBy, debug: true, limit: 21 };
     const q = searchQuery(category, options);
     const rows=(await db.query(q.sql,q.params)).results;
-    const compare=(a,b)=>a[orderBy]===b[orderBy] ? a.id-b.id : a[orderBy]==null ? -1 : b[orderBy]==null ? 1 : a[orderBy]<b[orderBy] ? -1 : 1;
-    assert.deepEqual(rows,[...rows].sort(compare));
+    const defaultQuery=searchQuery(category,{...options,orderBy:undefined});
+    assert.deepEqual(rows,(await db.query(defaultQuery.sql,defaultQuery.params)).results);
   }
   const values = Array(20).fill('Example');
   const options = { keyword: 'ddr5 6000 cl30 32gb', filters: { manufacturer: values, series: values, variant: values, ecc: values, registered: values.slice(0, 16) } };

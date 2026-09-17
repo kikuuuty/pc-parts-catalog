@@ -1,83 +1,118 @@
-# UX search evaluation contract
+# UX search evaluation and release contract
 
-The evaluation question is whether users can retrieve a relevant candidate set,
-apply typed filters, and select a product. It is not whether a broad query's
-previously expected SKU moved from rank 4 to rank 6.
+The gate protects finding, filtering, selecting, saving and sharing products.
+FTS/BM25 = candidate retrieval; display ordering = a separate concern.
+Historical ranks and Top20 precision are not browse release floors.
 
-## Fixture provenance
+## Independent source and optional diagnostics
 
-`loadSearchFixture` retains the frozen legacy 40 + Phase-2 80 input cases.
-`loadUXFixture` reuses all 120 plus extended 102, adding 11 UI cases. It maps
-class + request shape to lookup / identifier / browse / browse_filter /
-filter_only. A fixture may explicitly supply `intent`.
+The pinned BuildCores snapshot is
+`eec0df175504ebd15f0f3e3a8249a18a22f00940` (48,134 products).
+Normalized source records, not search results, supply relevant sets. Missing DB
+products remain in the denominator. Source verification checks raw data, product
+fields, category, active state, typed specs, identifiers and facets.
 
-- lookup uses expected IDs/selectors, optionally an explicit `equivalents` set.
-- identifier uses expected/equivalent SKU IDs and requires Hit@1.
-- browse uses existing source-grounded acceptable/set selectors, or source name
-  token conjunctions for the three previously unlabeled family cases.
-- browse_filter intersects that independent relevant set with typed filters,
-  ranges and facets evaluated on source records.
-- filter_only selects every source product satisfying those conditions.
+The 120 legacy + 102 extended + 11 frontend cases retain the five intents:
+lookup, identifier, browse, browse_filter, filter_only. The frozen source files
+are retained; `search-ux-overrides.json` describes the ten UX reclassifications.
 
-The pinned source is BuildCores
-`eec0df175504ebd15f0f3e3a8249a18a22f00940` (48,134 records). Source normalization
-and ID mapping happen before search. A missing source product is never removed
-from the relevant denominator merely because the candidate DB omitted it.
-No expected selector is generated from result order. The original files and
-extended source evidence remain unchanged. All extended judgments remain pending
-human review and block release; measurement is still reported.
+**Human review is optional and never a release gate.** There is no reviewer,
+rationale, checklist or completion quota. All 111 lookup fixtures are machine
+evaluated regardless of any human judgment. The fixture loader does not read
+`search-reviews.json`; old approval files cannot block release, even when missing
+or stale. Per-case fixture hashes remain provenance, not approval requirements.
 
-Human decisions are recorded in `test/fixtures/search-reviews.json`, keyed by
-case ID, with `status: "reviewed"`, `reviewer`, `rationale` and the frozen
-extended `fixture_sha256`. The loader rejects unknown IDs, incomplete decisions
-or stale hashes. This overlay changes review status only, never query/expected.
-It is empty in this change; no human decision is fabricated.
+When something looks wrong, `npm run diagnose:search` opens a loopback-only
+[diagnostic UI](search-diagnostics.md). Enter any category/query, optionally add
+typed filters, inspect actual results, and expand scores/plans only as needed.
+No judgments or diagnostic interactions are sent to the release gate.
 
-## Metrics
+Identifier needs no review. The query's normalized code (NFKC, trim, ASCII upper;
+preserve leading zeros, punctuation and internal spaces), optional type and
+category select owners directly from source identifiers. All source owners form
+the equivalent set, even when the code belongs to multiple products. A missing
+mapping fails; search must put a member at rank 1. Search results never define
+acceptable products. MPN/EAN/UPC/GTIN/JAN follow the same rule; identifier type is
+not silently converted to another barcode type.
 
-|Intent|Primary metrics / gate|
+## Gates and metrics
+
+|Intent|Release requirement|
 |---|---|
-|lookup|Hit@1/3/5, MRR; exact-model Hit@1, other lookup Hit@3; explicitly classified typo fallback Hit@5|
-|identifier|Hit@1=100%, explicit equivalent SKU set if necessary|
-|browse|Recall@10/20, Precision@10/20, relevant coverage, zero-result rate, FP/FN contamination|
-|browse_filter|full-window Recall/Precision, FP=FN=0, filter correctness, no out-of-filter products|
-|filter_only|exact set equality, distinct IDs, alternate-page-size traversal, stable repeated first page|
+|lookup|Automatically evaluate every case: exact_model Hit@1, normal Hit@3, explicit fallback/typo Hit@5; optional `floors.hit_at` override. Unexpected zero fails. Report Hit@1/3/5 and MRR.|
+|identifier|Source-grounded equivalent mapping; Hit@1=100%, no review.|
+|browse|Full candidate-window coverage ≥90%, precision ≥90%, no unexpected zero. Optional `floors.candidate_coverage` / `candidate_precision`. Report contamination and exhaustion.|
+|browse_filter|Independent relevant set intersected with source-side filters/ranges/facets: recall=precision=1, FP=FN=invalid_filter_products=0.|
+|filter_only|Every source match, exact set equality, no duplicates, no missing/extra, complete cursor traversal, alternate page size and stable order.|
+|product reference|Batch order/duplicates and current IDs; active/inactive/missing distinct; Detail identity matches source.|
 
-Recall@K = relevant returned in first K / complete source relevant count.
-Precision@K = relevant returned / returned slots up to K. Short but completely
-relevant lists therefore score 1, rather than being penalized for empty slots.
-Empty source and empty results have set precision/recall=1; unexpected empty
-results score zero. Zero-result rate is also reported separately, including
-intentional negative cases.
+Coverage = relevant returned / all independent relevant products. Precision =
+relevant returned / returned products. Empty source + empty result is correct;
+nonempty source + empty result fails. Top10/20 remain diagnostics only.
 
-For N>20, Recall@20 cannot exceed 20/N. The default browse gate requires at least
-90% of attainable Recall@20 (`0.9 * min(20,N)/N`) and Precision@20 ≥0.9.
-Both raw recall and relevant count remain visible. This is not a claim of 90%
-complete-catalog coverage. Candidate coverage is measured over the actual UI
-window: keyword=1,000, filter-only=100,000. Window exhaustion is explicit.
+For huge browse sets, a full keyword window means **more filtering required**.
+The attainable coverage is `min(1000,N)/N` only when the window is exhausted and
+N>1000; the coverage gate requires 90% of that attainable value, plus the same
+precision floor. Raw full-set coverage and FN remain visible. Thus 1000 relevant
+out of 2677 passes with `window_exhausted=true`; 80 relevant out of 84 returned
+for an 80-product source set also passes. Exhaustion alone never fails browse.
+Browse_filter still requires full equality: refine an overly broad fixture/UI
+flow rather than waive missing results.
 
-Ranking-sensitive metrics are null for browse/filter intents. Broad expected
-rank is never a release gate. Metrics are macro-averaged within each intent;
-FP/FN and filter violations are also reported as counts.
+## Ten old browse failures: frontend operation rationale
 
-All queries record the generated SQL's plan, catalog full scan and temp B-tree
-visibility. First UI page (50 rows) records local D1 rows_read and SQL duration;
-median/p95 are across cases. All-page costs are separate. Missing D1 metadata is
-null, never a synthetic zero. node:sqlite test adapters do not establish D1 cost.
-The conservative default per-case budgets are 500,000 rows and 250ms SQL;
-reviewed fixtures may set tighter limits. Temp B-trees over retrieved candidates
-are visible and allowed; unexpected catalog scans fail.
+These changes were authored from supported UI controls and source predicates,
+not returned rankings. There is no application UI in this repository; the API
+and `examples/shared-build.js` supply the consumer integration contract.
 
-## Commands and gates
+|Case|Before (free text / browse)|After|UX reason|
+|---|---|---|---|
+|p2-storage-990-2tb|990 pro 2tb|browse_filter: `990 pro`, capacity_gb=2000, manufacturer=Samsung|Model box + capacity/manufacturer selectors|
+|p2-storage-sn850-2tb|sn850x 2tb|browse_filter: `sn850x`, capacity_gb=2000|Model box + total capacity selector|
+|p2-storage-sn850-4tb|sn850x 4tb|browse_filter: `sn850x`, capacity_gb=4000|Same control, 4TB selection|
+|p2-storage-990-1tb|990 pro 1tb|browse_filter: `990 pro`, capacity_gb=1000, manufacturer=Samsung|Same control, 1TB selection|
+|p2-storage-sata1tb|sata 1tb|browse_filter: `sata`, capacity_gb=1000, nvme=0, storage_type=SSD|Capacity/device-type controls; retain SATA lexical requirement, since non-NVMe alone does not mean SATA|
+|p2-board-b650e-wifi|b650e wifi|browse_filter: `wifi`, chipset=AMD B650E|Chipset selector exists; Wi-Fi facet does **not** exist in the current typed model, so Wi-Fi remains lexical|
+|p2-case-meshify|meshify c|browse, unchanged lexical query|No typed Meshify C model control; do not invent a filter or broaden relevant products to hide contamination|
+|p2-case-matx|micro atx case|filter_only: form_factor in Micro ATX Mini Tower / Micro ATX Mid Tower|Case category + chassis-format selector|
+|p2-case-itx|mini itx case|filter_only: form_factor=Mini ITX Tower|Case category + chassis-format selector|
+|p2-cooler-freezer360|liquid freezer 360|browse_filter: `liquid freezer`, water_cooled=1, radiator_size_mm=360|Family box + cooler-type/radiator controls|
 
-`npm run benchmark:search` measures the intent suite; `--category`, `--suite`,
-`--class` select subsets. Custom fixtures must supply appropriate relevant sets.
-`npm run release:verify -- --local` invokes the same evaluator and fails closed
-on review debt, quality or performance violations. No saved historical rank or
-FTS fingerprint is a release floor.
+## Pagination and performance
 
-The original low-level benchmark module remains a ranking diagnostic/selector
-framework for existing diagnostic callers; it is not the production release
-quality model. BM25 explanations, corpus DF/document lengths, query plans,
-rows_read, SQL timing, storage, source fingerprints and sync cost remain useful
-diagnostics. Category-vs-shared-corpus adapters and artifacts were removed.
+Keyword retrieval has a 1000-result UI window. Keyword-free evaluation traverses
+the [cursor API semantics](pagination.md), with 50-row pages and an independent
+37-row traversal. There is no filter-only window or deep OFFSET evaluation.
+
+All seven performance intents report rows_read median/p95, SQL duration
+median/p95, query count and catalog full scans. Search costs describe the first
+51-row SQL operation (50 + lookahead); all-page costs/counts are separate.
+Detail costs sum four queries. Resolve samples use 1/12/32/64 references, one
+query each. EXPLAIN and source-audit queries are diagnostic overhead and excluded
+from UI cost. Plans include first/seek search pages and detail/resolve queries.
+Missing metadata is null and fails the gate, never converted to zero.
+
+Before remote measurements, no catalog full scans, complete metadata and the
+500,000 rows / 250ms **extreme per-operation safety ceiling** are required.
+This is not a production latency SLO. Candidate sorting temp B-trees are reported.
+
+Remote budgets are optional JSON keyed by the seven intents. Supported positive
+numeric fields are `max_rows_read`, `max_sql_duration_ms`, `rows_read_p95`,
+`sql_duration_ms_p95`, `max_query_count`. Unknown budget fields/intents fail.
+No official remote budget has been set from local results.
+
+```sh
+npm run benchmark:ux
+npm run release:verify -- --local
+node scripts/report-ux.js
+# Future, separately authorized read-only remote measurement:
+npm run benchmark:ux -- --remote --output .cache/search-ux-remote.json
+# After measuring/reviewing budgets:
+npm run benchmark:ux -- --remote --budgets path/to/intent-budgets.json
+```
+
+Release uses the same budgets via `PERFORMANCE_BUDGET_FILE`.
+`.cache/release-ux-report.json` is written before quality assertions, including
+failures, source integrity and 45 representative plans. Local verification is
+read-only after migrations and does not compile/deploy production configuration.
+Benchmark success means measurement completed, not that release passed.

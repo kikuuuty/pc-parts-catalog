@@ -1,9 +1,10 @@
 // Cache policy only. Call after the HTTP and searchQuery validation, never before.
 // Bump this namespace for response/search implementation changes, independently of catalog sync.
-export const CACHE_SCHEMA_GENERATION = 'v2';
+export const CACHE_SCHEMA_GENERATION = 'v3';
 const STORED_AT = 'X-Catalog-Cached-At';
 
 export function searchCachePolicy(env, input) {
+  if (input.cursor !== undefined) return null;
   const ttl = Number(env.SEARCH_CACHE_TTL_SECONDS ?? 300);
   const epoch = env.CATALOG_CACHE_EPOCH;
   if (![60, 300, 600].includes(ttl) || typeof epoch !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(epoch)) return null;

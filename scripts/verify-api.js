@@ -70,7 +70,7 @@ const apiSearch = async (item, knownHit = false) => {
     lastSearch = Date.now();
     if (expensive) lastExpensive = lastSearch;
   }
-  return item.search ? request('/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...item.search, category: item.category, keyword: item.query, limit: 20 }) })
+  return item.search ? request('/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...item.search, category: item.category, ...(item.query?{keyword:item.query}:{}), limit: 20 }) })
     : request(`/v1/search?${new URLSearchParams({ category: item.category, q: item.query, limit: '20' })}`);
 };
 const ids = rows => rows.map(p => p.upstream_key);
@@ -112,7 +112,7 @@ try {
   if (args.golden) {
     const { fixture } = await loadUXFixture();
     for (const item of fixture) {
-      const query = searchQuery(item.category, { ...item.search, keyword: item.query, limit: 20 });
+      const query = searchQuery(item.category, { ...item.search, ...(item.query?{keyword:item.query}:{}), limit: 20 });
       const direct = await db.query(query.sql, query.params);
       const api = await apiSearch(item);
       assert.deepEqual(ids(api.body.data), ids(direct.results), `Golden API ranking mismatch: ${item.id}`);

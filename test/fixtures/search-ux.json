@@ -7,7 +7,7 @@
   {"id":"ux-logitech","category":"mouse","intent":"browse","query":"Logitech","relevant":{"set":{"fields":{"product.manufacturer":"Logitech"}}}},
   {"id":"ux-mag-atx-b850","category":"motherboard","intent":"browse_filter","query":"MAG","search":{"filters":{"form_factor":"ATX","chipset":"AMD B850"},"orderBy":"name"},"relevant":{"set":{"nameTokens":["MAG"]}}},
   {"id":"ux-oled-27-4k","category":"monitor","intent":"browse_filter","query":"OLED","search":{"ranges":{"screen_size_inches":{"min":26.5,"max":27}},"filters":{"resolution_width":3840,"resolution_height":2160},"orderBy":"name"},"relevant":{"set":{"nameContains":["OLED"]}}},
-  {"id":"ux-board-atx-b850","category":"motherboard","intent":"filter_only","search":{"filters":{"form_factor":"ATX","chipset":"AMD B850"},"orderBy":"name"}},
-  {"id":"ux-memory-ddr5-32","category":"memory","intent":"filter_only","search":{"filters":{"ram_type":"DDR5","capacity_gb":32},"orderBy":"manufacturer"}},
-  {"id":"ux-board-empty","category":"motherboard","intent":"filter_only","search":{"filters":{"chipset":"nonexistent-chipset"},"orderBy":"name"}}
+  {"id":"ux-board-atx-b850","category":"motherboard","intent":"filter_only","search":{"filters":{"form_factor":"ATX","chipset":"AMD B850"}}},
+  {"id":"ux-memory-ddr5-32","category":"memory","intent":"filter_only","search":{"filters":{"ram_type":"DDR5","capacity_gb":32}}},
+  {"id":"ux-board-empty","category":"motherboard","intent":"filter_only","search":{"filters":{"chipset":"nonexistent-chipset"}}}
 ]

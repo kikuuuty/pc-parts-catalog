@@ -84,12 +84,13 @@ async function release(db, config, deploy) {
     if (deploy && process.env.GITHUB_ACTIONS === 'true') expected = JSON.parse(await readFile('.cache/release-snapshot.json', 'utf8'));
     const ready = await readiness(locked, { commit: expected?.commit, expectedCounts: expected?.counts });
     if (expected) assert.equal(ready.sync.id, expected.sync_id, 'Completed sync changed before release');
-    Object.assign(report, { sync_id: ready.sync.id, active: ready.active, completed_at: ready.sync.finished_at, cache_epoch: ready.cache_epoch });
+    Object.assign(report, { sync_id: ready.sync.id, active: ready.active, completed_at: ready.sync.finished_at, cache_epoch: ready.cache_epoch,fts_integrity:ready.fts.pass });
     stage('search quality / plans');
     Object.assign(report, await searchGate(locked));
     await renew();
     const confirm = await readiness(locked, { commit: ready.sync.source_commit, expectedCounts: ready.counts });
     assert.equal(confirm.sync.id, ready.sync.id);
+    if(args.local) { report.deploy='not run (local read-only verification)';return; }
     stage('compile deploy configuration');
     const vars = { ...config.vars, CATALOG_CACHE_EPOCH: ready.cache_epoch };
     // Root-level temporary config preserves ALL relative path semantics. Every

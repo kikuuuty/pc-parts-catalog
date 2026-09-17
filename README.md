@@ -7,7 +7,11 @@
 ```text
 category → category registry → category-specific FTS → candidate retrieval
   → typed filters / facets / ranges → stable display ordering
-  → frontend selection → GET /v1/products/:id → identifiers → price Provider
+  → cursor pagination (keywordはbounded OFFSET) → frontend selection
+  → GET /v1/products/:id → identifiers → price Provider
+
+saved/shared build → source + upstream_key
+  → POST /v1/products/resolve → current product ID/status
 ```
 
 全30カテゴリで検索対象とBM25 corpusを一致させます。FTS名は`ftsName(category)`から決定します。
@@ -54,6 +58,7 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 |`GET /v1/search?category=cpu&q=9800X3D`|簡易検索|
 |`POST /v1/search`|keyword、typed filters、ranges、facets、identifier、orderBy|
 |`GET /v1/products/:id`|選択した製品の詳細とcanonical identifiers|
+|`POST /v1/products/resolve`|最大64 stable refsを現在のIDとactive/inactive/missingへ一括解決|
 
 検索にはcategoryが必須です。通常候補一覧にはidentifierを付けません。必要なクライアントは既存の`include: ["identifiers", "facets"]`も使用できます。
 
@@ -62,7 +67,6 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
   "category": "motherboard",
   "keyword": "MAG",
   "filters": {"form_factor": "ATX", "chipset": "AMD B850"},
-  "orderBy": "name",
   "limit": 20,
   "offset": 0
 }
@@ -70,18 +74,24 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 
 `MAG → ATX → B850`のように候補を絞り込む操作を主要UXとします。入力field名・値はtyped modelに従います（memoryは`ram_type: "DDR5"`, `capacity_gb: 32`）。
 
-- `orderBy`: `relevance`、`name`、`manufacturer`、`series`、その他allowlist内のtyped field。常にproduct IDでtieを安定化します。
+- keywordなしdefault: manufacturer → series（NULLS LAST）→ name → id ASC、文字列はNOCASE。明示的`orderBy`はこのtupleの前に指定fieldを追加します。
+- keywordあり: relevance → manufacturer → series → name → id。`orderBy`指定でもrelevanceが最優先です。
 - 価格はcatalogに保持しません。将来のprice sortはProviderの価格データを統合する層の責務です。
 - filtersは同field内OR・field間AND、rangeは包含境界。NULLは条件一致にしません。
-- 既定20件、最大50件。keywordありは1,000件window、keywordなしのfilter/listは100,000件window（reviewed catalog上限）。`meta.next_offset`を使用してください。
-- GET検索は標準20件・先頭6ページだけedge cache。POSTはBYPASS。ブラウザ向けは`no-store`、CORS `*`。
+- 既定20件、最大50件。keywordありは1,000件window＋`meta.next_offset`。keywordなしはwindowを持たず、`meta.next_cursor`を同一条件と送信します。nonzero OFFSETは400です。
+- `window_exhausted=true`は絞り込みを促すUI状態です。詳細は[pagination契約](docs/pagination.md)。
+- keyword GET検索は標準20件・先頭6ページだけedge cache。cursor・POST・resolveはBYPASS。ブラウザ向けは`no-store`、CORS `*`。
 - 詳細なHTTP契約は[API文書](docs/cloudflare-production.md)、Product Detailは[詳細API文書](docs/product-detail.md)。
+
+**numeric id = current DB/runtime ID、source + upstream_key = durable shared reference**。
+search/detailの両responseにidentity fieldsを含みます。共有URL・保存構成・favorites・localStorage・export/importはpairを保存し、復元時にbatch resolveします。
+[Product Reference仕様](docs/product-reference.md)と[ブラウザ用adapter](examples/shared-build.js)を参照してください。
 
 ## 検索CLIと診断
 
 ```sh
 npm run search -- --category cpu --keyword 9800X3D --verbose
-npm run search -- --category motherboard --keyword MAG --order name
+npm run search -- --category motherboard --keyword MAG
 npm run search -- --category cpu --identifier-type mpn --identifier BX80768285K
 npm run search -- --query-file examples/gpu-search.json --explain
 npm run stats
@@ -99,29 +109,33 @@ local identifierは別の索引で候補に加わりますが、製品BM25には
 |Intent|主要指標|
 |---|---|
 |lookup|Hit@1/3/5、MRR、zero result|
-|identifier|Hit@1=100%、明示したequivalent SKU set|
-|browse|Recall@10/20、Precision@10/20、relevant coverage、contamination|
+|identifier|固定source snapshotのnormalized identifier所有集合に対してHit@1=100%|
+|browse|candidate-window relevant coverage / precision、unexpected zero、contamination、window exhaustion|
 |browse_filter|Recall/Precision、FP/FN、filter correctness、条件外製品0|
 |filter_only|exact set equality、pagination correctness、deterministic sort|
 |全intent|zero-result rate、rows_read/SQL duration median/p95、query plan、full scan、temp B-tree|
 
-旧120件とextended102件のquery/expectedを保存し、新classificationで再利用します。`search-ux.json`に実利用の11ケースを追加しています。
+旧120件とextended102件のsource fixtureを保持し、UX overlayで旧10 browse failureを再分類しています。`search-ux.json`に実利用の11ケースがあります。
 Browseは特定expectedの細かな順位で判定しません。relevant setはsource snapshotの独立条件・明示ID集合から導出します。
-extended102件は人間レビュー待ちとして可視化し、正式releaseを停止します。
+**人間による確認・承認はrelease条件にしません。** lookup111件を含め、品質チェックは機械評価します。
+検索に違和感があるときだけ`npm run diagnose:search`を実行し、`http://127.0.0.1:8788`でカテゴリと検索語を試せます。
+確認者名・理由・ノルマはありません。[ローカル検索チェック](docs/search-diagnostics.md)を参照してください。
 
 ```sh
 npm run benchmark:search -- --output .cache/search-ux.json
 npm run benchmark:search -- --category motherboard --verbose
 npm run benchmark:ux
+npm run verify:ux:local
 npm run release:verify -- --local
 ```
 
-benchmarkは測定、release gateは合否判定です。未達・レビュー待ちを期待値の自動変更で隠しません。
-定義・floor・大きな集合のRecall@20上限は[評価契約](docs/search-evaluation.md)を参照してください。
+benchmarkは測定、release gateは自動チェックの合否判定です。人間の確認状態は読み込みません。
+定義・floor・旧10件のbefore/after/UX理由・remote performance budget構造は[評価契約](docs/search-evaluation.md)を参照してください。
 
 ## Migration / sync / local data
 
 `0001`〜`0007`は適用済みmigration履歴として保持します。`0008_category_fts.sql`をgeneratorで管理し、`schema:check`で一致を確認します。
+今回追加の`0009_display_order.sql`は一覧用indexのみで、既存migrationは変更していません。
 既存製品ID/raw/spec/identifier/facetを保って検索索引を移行します。normalizer versionは1です。
 
 - `ingest`への1 SQL statementがproduct・raw・identifier・facet・typed spec・FTSをatomic更新。
@@ -146,7 +160,7 @@ npm run audit:duplicates -- --category gpu --manufacturer ASUS
 管理CLIはWrangler OAuthまたは`CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`を使用し、Worker runtimeはD1 bindingだけを使用します。
 
 release pipelineはmigration履歴・catalog/FTS integrity・UX品質・performance gateを通過したときだけ、同期IDからepochを生成してdeployします。
-epochは`sync-<id>-fts8-cache2`。migrationのproduction実行は別フェーズです。
+次回releaseのepochは`sync-<id>-fts8-cache3`。現在のproduction epochは変更していません。migrationのproduction実行は別フェーズです。
 運用・復旧・credential設定は[release手順](docs/catalog-release.md)。
 
 ## ライセンスと出典

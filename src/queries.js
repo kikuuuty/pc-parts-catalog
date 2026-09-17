@@ -1,9 +1,10 @@
 import { models, ftsName } from './model.js';
 import { identifierKey } from './normalize.js';
 import { parseSearchIntent, specSeed } from './search-intent.js';
+import { displayTerms, validateSortValues } from './pagination.js';
 
 const common = { name: 'TEXT', manufacturer: 'TEXT', series: 'TEXT', variant: 'TEXT', release_year: 'INTEGER' };
-const productColumns = ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
+const productColumns = ['id', 'source', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
 const productProjection = `${productColumns.map(field => `p.${field}`).join(',')},s.*`;
 // Immutable schema-derived SQL fragments, not a query/result cache. Reuse them
 // even on cache HIT validation instead of rebuilding dozens of aliases per call.
@@ -94,7 +95,7 @@ export function searchTerms(value) {
   return { strict: describe(tokens), fallback, identifierKind, name: value.normalize('NFKC').trim().toLowerCase() };
 }
 
-export function searchQuery(category, { keyword, filters = {}, ranges = {}, facets = {}, identifier, limit = 20, orderBy, debug = false } = {}) {
+export function searchQuery(category, { keyword, filters = {}, ranges = {}, facets = {}, identifier, limit = 20, orderBy, debug = false, after, cursorPage = false } = {}) {
   if (typeof category !== 'string' || !Object.hasOwn(models, category)) throw new Error(`Unknown category: ${category}`);
   const model = models[category];
   const index = ftsName(category);
@@ -149,15 +150,36 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   }
   let withSQL = '';
   let from = `products p JOIN ${model.table} s ON s.product_id=p.id`;
-  // Models with an order-leading index can stream a filtered sort before PK
-  // product/facet probes. This avoids fresh-statistics category-first sorting.
-  if (model.indexedOrderFirst && orderBy && (Object.hasOwn(filters, orderBy) || Object.hasOwn(ranges, orderBy))
-      && Object.values(model.indexes).some(columns => columns[0] === orderBy)) {
-    from = `${model.table} s CROSS JOIN products p ON p.id=s.product_id`;
+  // Retrieve typed candidates before display sorting. Otherwise the listing
+  // index can entice SQLite into probing an entire category for sparse filters.
+  const typedIndex=Object.entries(model.indexes).map(([name,columns])=>{
+    let prefix=0;
+    for(const field of columns) {
+      if(Object.hasOwn(filters,field))prefix+=2;
+      else {if(Object.hasOwn(ranges,field))prefix++;break;}
+    }
+    return {name,prefix};
+  }).filter(i=>i.prefix>0).sort((a,b)=>b.prefix-a.prefix)[0];
+  if(keyword===undefined && typedIndex) {
+    from = `${model.table} s INDEXED BY ${typedIndex.name} CROSS JOIN products p ON p.id=s.product_id`;
   }
   let diagnostics = '';
   let projection = productProjection;
-  let order = orderBy ? `${column(orderBy)},s.product_id` : 'p.id';
+  const sort = displayTerms();
+  if (orderBy) { const c=column(orderBy); sort.unshift(`${c} IS NULL`, `coalesce(${c},${fields[orderBy]==='TEXT'?"''":'0'})${fields[orderBy]==='TEXT'?' COLLATE NOCASE':''}`); }
+  if (after) {
+    if (keyword!==undefined) throw new Error('Keyword cursor unsupported');
+    validateSortValues(after,Boolean(orderBy));
+    if(orderBy && typeof after[1] !== (fields[orderBy]==='TEXT'?'string':'number'))throw new Error('Invalid cursor sort type');
+    // Explicit leading bound lets SQLite seek the expression index as well as
+    // applying the complete lexicographic tuple (including all tie-breaks).
+    where.push(`(${sort[0]})>=?`);
+    params.push(after[0]);
+    where.push(`(${sort.join(',')}) > (${after.map(()=>'?').join(',')})`);
+    params.push(...after);
+  }
+  let order = sort.join(',');
+  if (cursorPage && keyword===undefined) projection+=`,json_array(${sort.join(',')}) AS _cursor_values`;
   let predicates = where.join(' AND ');
   if (keyword !== undefined) {
     keywordTokens(keyword); // Validate the original input before consuming semantic tokens.
@@ -261,7 +283,7 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
     // The public path evaluates ranking once for ORDER BY, without a ranked spool.
     from = 'scored r';
     projection = searchColumns[category].projection;
-    order = orderBy ? `${column(orderBy).replace(/^([ps])\./, 'r._$1_')},r._s_product_id` : 'r.score DESC,r.id';
+    order = `r.score DESC,${displayTerms('r','_p_').join(',')}`;
     predicates = '1=1'; // Scope was applied before the strict-empty/fallback decision.
     if (debug) diagnostics = ',r.score AS search_score,r.match_type AS search_match,r.relevance AS search_fts_relevance,r.tier AS model_score,r.spec_score,r.manufacturer_score,r.freshness_score,r.fallback AS search_fallback';
   }

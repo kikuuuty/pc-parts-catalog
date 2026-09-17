@@ -3,12 +3,13 @@ import { searchQuery } from './queries.js';
 import { searchCachePolicy, searchCacheKey, readSearchCache, writeSearchCache } from './search-cache.js';
 import { protectSearch, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
 import { loadProductDetail, productDetailCache } from './product-detail.js';
-import { searchWindow } from './pagination.js';
+import { searchWindow, cursorContext, decodeCursor, encodeCursor } from './pagination.js';
+import { validateReferences, resolveProducts } from './product-reference.js';
 
 const MAX_BODY = 16 * 1024;
-const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'] };
-const fields = ['category', 'keyword', 'filters', 'ranges', 'facets', 'identifier', 'orderBy', 'limit', 'offset', 'include'];
-const productFields = ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
+const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'], '/v1/products/resolve':['POST'] };
+const fields = ['category', 'keyword', 'filters', 'ranges', 'facets', 'identifier', 'orderBy', 'limit', 'offset', 'include', 'cursor'];
+const productFields = ['id', 'source', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
 const source = {
   name: 'BuildCores OpenDB', url: 'https://github.com/buildcores/buildcores-open-db',
   license: 'ODC-By 1.0', license_url: 'https://opendatacommons.org/licenses/by/1-0/',
@@ -35,7 +36,7 @@ function selections(value, max) {
 }
 
 // HTTP limits supplement searchQuery's category/column/type/FTS allowlists.
-function validate(input) {
+async function validate(input, env) {
   keys(input, fields);
   if (!categories.includes(input.category)) invalid('category is required and must be a supported category');
   for (const key of ['keyword', 'orderBy']) if (input[key] !== undefined && !shortText(input[key])) invalid(`${key} must be a nonempty string of at most 200 characters`);
@@ -43,7 +44,8 @@ function validate(input) {
   const maxWindow = searchWindow(input);
   if (!Array.isArray(include) || include.length > 2 || new Set(include).size !== include.length || include.some(v => !['identifiers', 'facets'].includes(v))) invalid('include accepts identifiers and facets');
   if (!Number.isInteger(limit) || limit < 1 || limit > 50) invalid('limit must be an integer from 1 to 50');
-  if (!Number.isInteger(offset) || offset < 0 || offset + limit > maxWindow) invalid(`offset must be nonnegative and offset + limit must not exceed ${maxWindow}`);
+  if (!Number.isInteger(offset) || offset < 0 || (maxWindow===null ? offset!==0 : offset+limit>maxWindow)) invalid('Invalid offset; keyword-free searches require cursor pagination');
+  if (input.cursor!==undefined && (input.keyword!==undefined || offset!==0)) invalid('Cursor requires keyword-free search');
   const values = selections(filters, 8) + selections(facets, 4);
   if (!object(ranges) || Object.keys(ranges).length > 8) invalid('ranges must be an object with at most 8 fields');
   for (const range of Object.values(ranges)) {
@@ -55,15 +57,17 @@ function validate(input) {
     keys(input.identifier, ['type', 'value']);
     if (!shortText(input.identifier.value) || input.identifier.type !== undefined && !['mpn', 'gtin', 'ean', 'upc', 'jan'].includes(input.identifier.type)) invalid('Invalid identifier');
   }
+  const context=await cursorContext(input,env.CATALOG_CACHE_EPOCH??'unversioned');
   let query;
   try {
     // One extra row determines whether a following page exists without COUNT(*).
-    query = searchQuery(input.category, { ...input, limit: limit + 1, debug: false });
+    const after=input.cursor===undefined?undefined:await decodeCursor(input.cursor,context);
+    query = searchQuery(input.category, { ...input, after, cursorPage:maxWindow===null, limit: limit + 1, debug: false });
   } catch {
     invalid('Invalid search conditions; check keyword tokens, filter fields, types, ranges and orderBy');
   }
   if (query.params.length >= 100) invalid('Search conditions exceed parameter limit');
-  return { category: input.category, limit, offset, maxWindow, include, query: { sql: `${query.sql} OFFSET ?`, params: [...query.params, offset] } };
+  return { category: input.category, limit, offset, maxWindow, include, context, query: maxWindow===null ? query : { sql: `${query.sql} OFFSET ?`, params: [...query.params, offset] } };
 }
 
 async function jsonInput(request) {
@@ -106,7 +110,7 @@ async function searchInput(request, url) {
   }
   const input = {};
   for (const [key, value] of url.searchParams) {
-    if (!['category', 'q', 'limit', 'offset'].includes(key) || url.searchParams.getAll(key).length !== 1) invalid('Unknown or repeated query parameter');
+    if (!['category', 'q', 'limit', 'offset', 'cursor'].includes(key) || url.searchParams.getAll(key).length !== 1) invalid('Unknown or repeated query parameter');
     if (key === 'limit' || key === 'offset') {
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) invalid('Invalid pagination number');
       input[key] = Number(value);
@@ -200,6 +204,12 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
                 }
               } finally { release(); }
             }
+          } else if (url.pathname === '/v1/products/resolve') {
+            let refs;
+            const input=await jsonInput(request);
+            try { refs=validateReferences(input); } catch(error) { invalid(error.message); }
+            const release=await protectSearch(env,event,{},'POST',null,refillGuard);
+            try { payload=await resolveProducts(execute,refs); } finally { release(); }
           } else if (url.pathname === '/v1/health') {
             await protectHealth(env, event);
             await execute('SELECT 1 AS ok');
@@ -209,7 +219,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
             headers.set('Cache-Control', 'public, max-age=60, s-maxage=60');
           } else {
             const input = await searchInput(request, url);
-            const { category, limit, offset, maxWindow, include, query } = validate(input);
+            const { category, limit, offset, maxWindow, include, context, query } = await validate(input,env);
             Object.assign(event, { category, limit, offset });
             const policy = request.method === 'GET' ? searchCachePolicy(env, input) : null;
             const cache = injectedCache ?? globalThis.caches?.default;
@@ -231,7 +241,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
               try {
                 const rows = await execute(query.sql, query.params);
                 const hasMore = rows.length > limit;
-                const nextOffset = hasMore && offset + 2 * limit <= maxWindow ? offset + limit : null;
+                const nextOffset = maxWindow!==null && hasMore && offset + limit < maxWindow ? offset + limit : null;
                 // Opt-in POST expansion keeps existing GET/cache and default POST
                 // payloads exact. One bounded indexed query covers only this page.
                 const page = rows.slice(0, limit);
@@ -256,7 +266,8 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
                     ...extras.get(row.id),
                   })),
                   meta: { limit, offset, returned: Math.min(rows.length, limit), has_more: hasMore, next_offset: nextOffset,
-                    window_limit: maxWindow, window_exhausted: hasMore && nextOffset === null, source },
+                    next_cursor:maxWindow===null && hasMore ? await encodeCursor(context,JSON.parse(page.at(-1)._cursor_values)) : null,
+                    window_limit: maxWindow, window_exhausted: maxWindow!==null && hasMore && nextOffset === null, source },
                 };
                 if (key) {
                   try {

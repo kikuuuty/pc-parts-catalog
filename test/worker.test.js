@@ -114,10 +114,9 @@ test('Pagination preserves ranking/ties, lookahead and the explicit 1000-result 
   const direct = searchQuery('memory', { keyword: 'ddr5', limit: 100 });
   assert.deepEqual(ids, (await db.query(direct.sql, direct.params)).results.map(p => p.id));
   assert.equal(new Set(ids).size, 65);
-  assert.equal((await request('/v1/search?category=memory&limit=50&offset=950')).status, 200);
+  assert.equal((await request('/v1/search?category=memory&limit=50&offset=950')).status, 400);
   assert.equal((await request('/v1/search?category=memory&q=ddr5&limit=50&offset=951')).status, 400);
-  assert.equal((await request('/v1/search?category=memory&limit=50&offset=1000')).status, 200);
-  assert.equal((await request('/v1/search?category=memory&limit=50&offset=99951')).status, 400);
+  assert.equal((await request('/v1/search?category=memory&limit=50&offset=1000')).status, 400);
   const manyRows = { ...fakeLimiters({ unlimited: true }), DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: Array.from({ length: 51 }, () => ({})) }) }) }) } };
   const boundary = await createWorker({ log() {} }).fetch(new Request('https://catalog.example/v1/search?category=memory&q=ddr5&offset=950&limit=50'), manyRows);
   const { meta } = await boundary.json();

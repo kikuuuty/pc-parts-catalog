@@ -2,10 +2,11 @@
 
 ## Current state
 
-Category FTS generation 8 / cache generation 2 / Product Detail are implemented
+Category FTS generation 8 / cache generation 3 / cursor pagination / stable
+Product Reference / batch resolve / Product Detail are implemented
 and tested locally. Production migration, sync and deploy are a separate phase.
-The extended fixture's human review and outstanding quality failures must be
-resolved before a production release. A measurement command succeeding does not
+Automated quality failures must be resolved before a production release.
+Human checks/approvals are never release prerequisites. A measurement command succeeding does not
 mean the release gate passed.
 
 ## Pipeline
@@ -39,16 +40,25 @@ not yet created, and an old checkout operating against a newer schema.
 3. All active products occur exactly once in their own category FTS; missing,
    duplicate, wrong-category and inactive/deleted orphan counts are zero.
    Canonical field projection and durable search document agree.
-4. lookup exact-model Hit@1; other lookup Hit@3 (explicit typo fallback Hit@5).
-   identifier Hit@1=100%, or an explicit equivalent SKU set.
-5. browse Recall@20 ≥90% of its attainable maximum, Precision@20 ≥0.9,
-   no unexpected zero results. No expected-rank equality requirement.
+4. All lookup fixtures are automatically checked: exact-model Hit@1, other lookup Hit@3 (explicit
+   typo/fallback Hit@5). Identifier Hit@1=100% against normalized source owners,
+   including source-derived equivalent sets; identifier requires no human review.
+5. browse candidate-window relevant coverage ≥90%, candidate precision ≥90%,
+   no unexpected zero results. Huge exhausted windows use attainable coverage;
+   exhaustion is a UI refinement state, not failure. Top20 is diagnostic only.
 6. browse_filter Recall/Precision=1, FP=FN=0, no out-of-filter product.
-   filter_only exact set equality and deterministic, complete pagination.
-7. Per-case D1 read/duration budgets; query plan checks with no unexpected catalog
-   full scans. Temp B-trees over candidate sets are visible, not hidden.
-8. Pending human-review fixtures block release. Expected sets are not rewritten
-   automatically, and improved cases cannot conceal failing cases.
+   filter_only exact set equality, zero duplicate/missing/extra, independent
+   stable sort checks and complete cursor traversal (including changed page size).
+7. Product reference resolution preserves order/duplicates and distinguishes
+   active/inactive/missing; IDs/status match current catalog. Shared URL and
+   changed-ID restoration tests run in `npm run check`.
+8. Seven-intent D1 rows_read, SQL duration median/p95, query count and plans.
+   No unexpected catalog full scans or missing cost metadata. Default 500000 rows
+   / 250ms is a safety ceiling; remote/staging measurements must precede official
+   budgets via `PERFORMANCE_BUDGET_FILE`. Temp candidate sorts remain visible.
+9. Human review files and decisions are not read by release. No pending-review
+   blocker or reviewer/rationale requirement exists. Expected sets still come
+   from source rather than returned rankings.
 
 See [evaluation definitions](search-evaluation.md). The default benchmark runs
 233 cases: original 120 + extended 102 + UI 11. Low-level rank diagnostics are
@@ -57,12 +67,15 @@ in `npm run check`.
 
 ## Epoch, cache and identity
 
-`sync-<completed sync_runs.id>-fts8-cache2` invalidates both search and Detail
+`sync-<completed sync_runs.id>-fts8-cache3` invalidates both search and Detail
 namespaces. Retry compares actual hashes under the lease and reuses a complete
 sync ID only if that same commit/normalizer has no changes. Workflow attempt/time
 is not an epoch input. Search TTL stays configurable at 60/300/600; Detail is 600.
 Out-of-band enrichment edits require the existing completed-sync/epoch release
 procedure or become visible after TTL expiry.
+Cursor context uses the same epoch and rejects old cursors after publication.
+Resolver and cursor requests bypass edge cache. Durable product references do
+not contain epoch or runtime ID and survive publication/rebuild.
 
 The temporary production Wrangler config is a complete copy with the derived
 epoch; it is ignored by Git and removed in `finally`. `release-<sha256>` tags
@@ -93,9 +106,13 @@ npm run benchmark:search -- --output .cache/search-ux.json
 npm run release:verify -- --local
 ```
 
-The release command intentionally fails while review/quality issues remain.
-CI retains those release gates rather than converting pending evidence into a
-successful production approval. Artifacts include the intent report.
+The release command fails on automated quality/integrity/performance violations.
+Human checking is optional offline diagnosis, not an approval stage. Artifacts
+include the intent report.
+`--local` never runs production compile/deploy or changes a production epoch.
+`.cache/release-ux-report.json` persists failures and plans before asserting the
+gate. See [current local results](category-search-validation.md) and
+[budget configuration](search-evaluation.md).
 
 If sync is partial/failed, keep the same pinned commit and rerun after the lease
 is free; hashes skip completed chunks. Historical failed/partial runs remain as

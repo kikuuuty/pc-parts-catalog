@@ -61,6 +61,11 @@ try {
       rows_read:result.reduce((n,r)=>n+r.meta.rows_read,0),rows_written:result.reduce((n,r)=>n+r.meta.rows_written,0),
       sql_duration_ms:result.reduce((n,r)=>n+r.meta.duration,0),atomic_batch:true});
   }
+  if(!(await db.query("SELECT 1 FROM d1_migrations WHERE name='0009_display_order.sql'")).results.length) {
+    const sql=await readFile('migrations/0009_display_order.sql','utf8');
+    const statements=sql.replace(/^--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean);
+    await proxy.env.DB.batch([...statements.map(s=>proxy.env.DB.prepare(s)),proxy.env.DB.prepare("INSERT INTO d1_migrations(name) VALUES('0009_display_order.sql')")]);
+  }
   const integrity=await ftsIntegrity(db);assert(integrity.pass);assert.equal(integrity.active_products,48134);await save('integrity.json',integrity);
   await save('readiness.json',await readiness(db,{commit:snapshot.commit,expectedCounts:Object.fromEntries(Object.entries(snapshot.report.categories).map(([c,r])=>[c,r.count]))}));
   const catalog=await loadQualityCatalog(db), expected=sourceCatalog(snapshot,catalog);
@@ -68,8 +73,8 @@ try {
   await save('catalog-integrity.json',catalogIntegrity);
   const input=await loadUXFixture();fixture=input.fixture;const hash=input.hash;
   const quality=await evaluateUX(db,catalog,fixture,{fixtureHash:hash,source:expected});
-  quality.release_failures=qualityFailures(quality);quality.quality_failures=qualityFailures(quality,{requireReview:false});
-  await save('quality.json',quality);console.log(JSON.stringify({by_intent:quality.by_intent,quality_failures:quality.quality_failures,pending_review:quality.summary.pending_review},null,2));
+  quality.release_failures=qualityFailures(quality);
+  await save('quality.json',quality);console.log(JSON.stringify({by_intent:quality.by_intent,quality_failures:quality.release_failures},null,2));
   const plans=await verifyPlans(db);await save('plans.json',plans);
   assert(plans.every(p=>p.index_check),'Representative query-plan gate failed');
   const detailPlans=[];

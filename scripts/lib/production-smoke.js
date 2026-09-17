@@ -7,6 +7,7 @@ import { loadProductDetail } from '../../src/product-detail.js';
 import { catalogState, assertCatalogState } from '../../src/quality/catalog.js';
 import { assertCategories, assertSearchContract, assertPublicHeaders } from './api-contract.js';
 import { models } from '../../src/model.js';
+import { resolveProducts } from '../../src/product-reference.js';
 
 export function productionOrigin(value) {
   const url = new URL(value);
@@ -52,23 +53,23 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
   assert.equal(invalid.body.error.code, 'INVALID_REQUEST');
   assert.equal((await request('/v1/search', { method: 'PUT' }, 405)).body.error.code, 'METHOD_NOT_ALLOWED');
 
-  const search = async (input, method = 'GET') => {
+  const search = async (input, method = 'GET', after) => {
     const { category, keyword, limit = 20, offset = 0, ...advanced } = input;
     const result = method === 'POST'
       ? await request('/v1/search', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) })
-      : await request(`/v1/search?${new URLSearchParams({ category, q: keyword, limit: String(limit), offset: String(offset) })}`);
+      : await request(`/v1/search?${new URLSearchParams({ category, ...(keyword!==undefined?{q:keyword}:{}),...(input.cursor?{cursor:input.cursor}:{}), limit: String(limit), offset: String(offset) })}`);
     assertSearchContract(result.body, input);
     assert.equal(result.response.headers.get('cache-control'), 'no-store');
-    const q = searchQuery(category, { ...advanced, keyword, limit: limit + 1 });
-    const rows = (await db.query(`${q.sql} OFFSET ?`, [...q.params, offset])).results;
+    const q = searchQuery(category, { ...advanced, after, cursorPage:keyword===undefined, keyword, limit: limit + 1 });
+    const rows = (await db.query(keyword===undefined?q.sql:`${q.sql} OFFSET ?`, keyword===undefined?q.params:[...q.params, offset])).results;
     assert.deepEqual(result.body.data.map(p => p.upstream_key), rows.slice(0, limit).map(p => p.upstream_key), 'API/direct top results differ');
     for (const [i, product] of result.body.data.entries()) {
       assert.deepEqual(product.specs, Object.fromEntries(Object.keys(models[category].fields).map(field => [field, rows[i][field] ?? null])), 'API/direct specs differ');
-      for (const field of ['id', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url']) assert.equal(product[field], rows[i][field] ?? null, `API/direct ${field} differs`);
+      for (const field of ['id', 'source', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url']) assert.equal(product[field], rows[i][field] ?? null, `API/direct ${field} differs`);
     }
     assert.equal(result.body.meta.has_more, rows.length > limit);
     if (method === 'POST') assert.equal(result.response.headers.get('x-cache'), 'BYPASS');
-    return result;
+    return {...result,lastSortValues:keyword===undefined&&rows.length?JSON.parse(rows.slice(0,limit).at(-1)._cursor_values):undefined};
   };
   const representatives = [
     { category: 'cpu', keyword: '9800x3d' },
@@ -125,11 +126,19 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
   if (golden) {
     const { fixture } = await loadUXFixture();
     for (const item of fixture) {
-      await search({ ...item.search, category: item.category, keyword: item.query }, item.search ? 'POST' : 'GET');
+      await search({ ...item.search, category: item.category, ...(item.query?{keyword:item.query}:{}) }, item.search ? 'POST' : 'GET');
       matched++;
     }
     assert.equal(matched, fixture.length);
   }
+  const listing=await search({category:'memory',limit:3},'POST');
+  assert(listing.body.meta.next_cursor);
+  await search({category:'memory',limit:5,cursor:listing.body.meta.next_cursor},'POST',listing.lastSortValues);
+  const refs=listing.body.data.map(({source,upstream_key})=>({source,upstream_key}));
+  refs.push(refs[0],{source:'unknown',upstream_key:'CPU/missing'});
+  const resolved=await request('/v1/products/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({products:refs})});
+  assert.deepEqual(resolved.body,await resolveProducts(async(sql,params)=>(await db.query(sql,params)).results,refs));
+  assert.equal(resolved.response.headers.get('x-cache'),'BYPASS');
   await assertCatalogState(db, initial);
   return { contract: 'pass', cache: 'MISS -> HIT; POST body equal', golden_api_matched: matched, extended_categories: extended };
 }
