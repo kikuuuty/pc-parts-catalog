@@ -1,9 +1,9 @@
 # Cloudflare D1 / Worker API
 
-This document describes the current checkout. Category FTS generation 8 and
-Product Detail, cursor pagination and batch reference resolve have been validated
-locally; production activation is a separate
-phase. Historical remote measurements are in `production-*-baseline.md`,
+Category FTS generation 8, Product Detail, cursor pagination and batch reference
+resolve are **live and production-verified as of 2026-09-18**. See the
+[transition report/runbook](production-transition.md) for the current database,
+Worker version, recovery and measured intent budgets. Historical measurements are in `production-*-baseline.md`,
 `production-cache.md` and `production-rate-limiting.md`; they are not current
 quality floors. See [release gates](catalog-release.md) before production changes.
 
@@ -43,8 +43,8 @@ integrity, quality, Detail/cache, plans and storage measurements. See
 
 ### Frontend integration quick reference
 
-Production origin remains `https://pc-parts-catalog.kikuuuty.workers.dev`;
-the new endpoints/schema require a future release. For this phase use local dev.
+Production origin is **`https://pc-parts-catalog.kikuuuty.workers.dev`**.
+All endpoints below are available now, with public CORS and no client credential.
 
 |Request|Contract|
 |---|---|

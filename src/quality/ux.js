@@ -186,7 +186,7 @@ export function qualityFailures(report, { budgets = {} } = {}) {
     if (Object.hasOwn(r,'all_pages_rows_read') && (!Number.isFinite(r.all_pages_rows_read)||!Number.isFinite(r.all_pages_sql_duration_ms))) fail('missing pagination cost metadata');
     const budget=budgets[r.intent]??{};
     if (r.rows_read>(budget.max_rows_read??500000) || r.sql_duration_ms>(budget.max_sql_duration_ms??250)) fail('performance safety ceiling');
-    if(r.max_page_rows_read>500000||r.max_page_sql_duration_ms>250)fail('pagination safety ceiling');
+    if(r.max_page_rows_read>(budget.max_rows_read??500000)||r.max_page_sql_duration_ms>(budget.max_sql_duration_ms??250))fail('pagination safety ceiling');
     if (r.intent.startsWith('product_')) { if(!r.correctness)fail('product reference/detail correctness');continue; }
     if (['lookup','identifier'].includes(r.intent)) {
       const cutoff = r.intent==='identifier' ? 1 : r.floors?.hit_at ?? (r.class==='exact_model' ? 1 : ['fallback','typo'].includes(r.class) ? 5 : 3);

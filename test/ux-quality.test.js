@@ -86,6 +86,12 @@ test('intent performance budgets apply p95/count and missing metadata fails clos
   const results=[{id:'id',intent:'identifier',rank:1,source_grounded:true,rows_read:123,sql_duration_ms:7,query_count:2}];
   assert(qualityFailures({results},{budgets:{identifier:{rows_read_p95:100,sql_duration_ms_p95:5,max_query_count:1}}}).filter(f=>f.includes('budget')).length===3);
   assert.throws(()=>qualityFailures({results},{budgets:{identifier:{rows_read_p95:-1}}}));
+  results[0].max_page_rows_read=151;
+  assert(qualityFailures({results},{budgets:{identifier:{max_rows_read:150}}}).includes('id: pagination safety ceiling'));
+  results[0].max_page_rows_read=150;results[0].max_page_sql_duration_ms=31;
+  assert(qualityFailures({results},{budgets:{identifier:{max_rows_read:150,max_sql_duration_ms:30}}}).includes('id: pagination safety ceiling'));
+  results[0].max_page_sql_duration_ms=30;
+  assert(!qualityFailures({results},{budgets:{identifier:{max_rows_read:150,max_sql_duration_ms:30}}}).includes('id: pagination safety ceiling'));
   results[0].sql_duration_ms=null;assert(qualityFailures({results}).includes('id: missing D1 cost metadata'));
 });
 

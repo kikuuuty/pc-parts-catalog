@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 
 export function remoteDatabaseId(config, override) {
   const bindings = config.d1_databases?.filter(db => db.binding === 'DB') ?? [];
-  if (bindings.length !== 1 || bindings[0].database_name !== 'pc-parts-catalog') throw new Error('Expected one DB binding to pc-parts-catalog');
+  if (bindings.length !== 1 || !['pc-parts-catalog','pc-parts-catalog-fts8'].includes(bindings[0].database_name)) throw new Error('Expected one DB binding to pc-parts-catalog or pc-parts-catalog-fts8');
   const id = override || bindings[0].database_id;
   if (typeof id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id) || /^00000000-0000-0000-0000-/i.test(id)) {
     throw new Error('Configure the real remote D1 UUID in wrangler.json (or CLOUDFLARE_D1_DATABASE_ID for the management CLI)');

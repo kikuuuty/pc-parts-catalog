@@ -1,0 +1,9 @@
+{
+  "lookup": { "rows_read_p95": 650, "sql_duration_ms_p95": 45, "max_rows_read": 3000, "max_sql_duration_ms": 150, "max_query_count": 1 },
+  "identifier": { "rows_read_p95": 125, "sql_duration_ms_p95": 50, "max_rows_read": 150, "max_sql_duration_ms": 150, "max_query_count": 1 },
+  "browse": { "rows_read_p95": 14000, "sql_duration_ms_p95": 90, "max_rows_read": 45000, "max_sql_duration_ms": 200, "max_query_count": 1 },
+  "browse_filter": { "rows_read_p95": 19000, "sql_duration_ms_p95": 85, "max_rows_read": 32000, "max_sql_duration_ms": 180, "max_query_count": 1 },
+  "filter_only": { "rows_read_p95": 13000, "sql_duration_ms_p95": 50, "max_rows_read": 14000, "max_sql_duration_ms": 150, "max_query_count": 1 },
+  "product_detail": { "rows_read_p95": 50, "sql_duration_ms_p95": 15, "max_rows_read": 60, "max_sql_duration_ms": 50, "max_query_count": 4 },
+  "product_resolve": { "rows_read_p95": 400, "sql_duration_ms_p95": 10, "max_rows_read": 420, "max_sql_duration_ms": 30, "max_query_count": 1 }
+}

@@ -14,6 +14,7 @@ import { verifyProduction } from './lib/production-smoke.js';
 
 const { positionals: [command], values: args } = parseArgs({ allowPositionals: true, options: {
   local: { type: 'boolean', default: false },
+  representative: { type: 'boolean', default: false },
 } });
 assert(['pin', 'sync', 'verify', 'deploy'].includes(command), 'Use pin, sync, verify or deploy');
 assert(!args.local || command === 'verify', '--local is only for read-only gate verification');
@@ -86,7 +87,7 @@ async function release(db, config, deploy) {
     if (expected) assert.equal(ready.sync.id, expected.sync_id, 'Completed sync changed before release');
     Object.assign(report, { sync_id: ready.sync.id, active: ready.active, completed_at: ready.sync.finished_at, cache_epoch: ready.cache_epoch,fts_integrity:ready.fts.pass });
     stage('search quality / plans');
-    Object.assign(report, await searchGate(locked));
+    Object.assign(report, await searchGate(locked,{representative:args.representative}));
     await renew();
     const confirm = await readiness(locked, { commit: ready.sync.source_commit, expectedCounts: ready.counts });
     assert.equal(confirm.sync.id, ready.sync.id);
@@ -129,7 +130,11 @@ async function release(db, config, deploy) {
       }
       stage('production smoke / contract / Golden');
       report.post_deploy = 'running';
-      report.verification = await verifyProduction(locked, 'https://pc-parts-catalog.kikuuuty.workers.dev');
+      report.verification = await verifyProduction(locked, 'https://pc-parts-catalog.kikuuuty.workers.dev', {golden:!args.representative});
+      if(args.representative) {
+        stage('production read-only release verification');
+        report.release_validation = await searchGate(locked,{representative:true,output:'.cache/transition-production-gate.json'});
+      }
       await renew();
       const after = await api.current();
       assert.equal(after.id, report.worker_version, 'Worker changed during verification');

@@ -99,6 +99,9 @@ test('epoch tracks snapshot/projection/cache generations, not workflow attempts'
 test('production config rejects mismatched remote overrides, retains TTL and checks effective deployed vars', async () => {
   const config = JSON.parse(await readFile('wrangler.json', 'utf8'));
   assert.equal(productionConfig(config, {}).vars.SEARCH_CACHE_TTL_SECONDS, '300');
+  const retained=structuredClone(config);
+  retained.d1_databases[0]={...retained.d1_databases[0],database_name:'pc-parts-catalog',database_id:'180175e0-edc0-49df-a9d7-5958d5982e8f'};
+  assert.throws(()=>productionConfig(retained,{CLOUDFLARE_D1_DATABASE_ID:'0d64ee1a-6ead-4bfd-9dfd-91535e5b3030'}),'Old checkout fails closed after binding guard publication');
   assert.throws(() => productionConfig(config, { CLOUDFLARE_D1_DATABASE_ID: config.env.local.d1_databases[0].database_id }));
   assert.throws(() => productionConfig(config, { CLOUDFLARE_ACCOUNT_ID: '0'.repeat(32) }));
   const bindings = Object.entries(config.vars).map(([name, text]) => ({ name, type: 'plain_text', text }));

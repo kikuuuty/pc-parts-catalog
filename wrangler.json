@@ -13,7 +13,7 @@
     { "name": "HEALTH_LIMITER", "namespace_id": "29599004", "simple": { "limit": 60, "period": 60 } }
   ],
   "vars": {
-    "CATALOG_CACHE_EPOCH": "sync-34aa2c91-d6eb-448b-8ece-05f027a156c2-fts6-cache1",
+    "CATALOG_CACHE_EPOCH": "sync-dc3cb03f-3361-4bb4-a5c6-3584260cdb79-fts8-cache3",
     "SEARCH_CACHE_TTL_SECONDS": "300"
   },
   "observability": {
@@ -23,8 +23,8 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "pc-parts-catalog",
-      "database_id": "180175e0-edc0-49df-a9d7-5958d5982e8f",
+      "database_name": "pc-parts-catalog-fts8",
+      "database_id": "0d64ee1a-6ead-4bfd-9dfd-91535e5b3030",
       "migrations_dir": "migrations"
     }
   ],

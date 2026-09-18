@@ -87,21 +87,27 @@ export async function readiness(db, { commit, expectedCounts } = {}) {
 export function assertGolden(report) {
   assert.deepEqual(qualityFailures(report), [], 'UX release gate failed');
 }
-export async function searchGate(db) {
+export async function searchGate(db, { representative = false, output = '.cache/release-ux-report.json' } = {}) {
   const plans = await verifyPlans(db);
   const catalog = await loadQualityCatalog(db);
-  const { fixture, hash } = await loadUXFixture();
+  const { fixture: fullFixture, hash } = await loadUXFixture();
+  const selected = new Set(['cpu-9800x3d','ux-dt990-pro250','ux-mag','ux-meshify','ux-mag-atx-b850','ux-oled-27-4k','ux-board-atx-b850','ux-memory-ddr5-32','ux-board-empty',
+    ...fullFixture.filter(r=>r.intent==='identifier').slice(0,2).map(r=>r.id)]);
+  const fixture = representative ? fullFixture.filter(r=>selected.has(r.id)) : fullFixture;
+  if(representative) assert.equal(fixture.length,11,'Representative fixture coverage changed');
   const snapshot=await loadSnapshot();
   assert.equal(snapshot.commit,catalog.metadata.last_sync?.source_commit,'Evaluation snapshot differs');
   const sourceIntegrity=await verifySourceCatalog(db,catalog,snapshot);
   assert(sourceIntegrity.pass,'Source catalog integrity failed');
   const report = await evaluateUX(db, catalog, fixture, { fixtureHash: hash,source:sourceCatalog(snapshot,catalog) });
-  const budgets=process.env.PERFORMANCE_BUDGET_FILE?JSON.parse(await readFile(process.env.PERFORMANCE_BUDGET_FILE,'utf8')):{};
+  const budgetFile=process.env.PERFORMANCE_BUDGET_FILE || 'docs/production-performance-budgets.json';
+  const budgets=JSON.parse(await readFile(budgetFile,'utf8'));
+  report.measurement={profile:representative?'bounded-production':'full',budget_file:budgetFile,budgets,measured_at:new Date().toISOString()};
   report.release_failures=qualityFailures(report,{budgets});
   report.diagnostic_commands=[...new Set(report.release_failures.map(f=>f.split(':')[0]))].filter(id=>report.results.some(r=>r.id===id)).map(id=>`npm run diagnose:search -- --case ${id}`);
   report.source_integrity=sourceIntegrity;
   report.plans=plans;
-  await writeFile('.cache/release-ux-report.json',JSON.stringify(report,null,2)+'\n');
+  await writeFile(output,JSON.stringify(report,null,2)+'\n');
   for(const command of report.diagnostic_commands)console.log(command);
   assert(plans.length > 0 && plans.every(r => r.index_check), 'Query plan gate failed');
   assert.deepEqual(report.release_failures,[],'UX release gate failed');

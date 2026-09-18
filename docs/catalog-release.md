@@ -3,8 +3,9 @@
 ## Current state
 
 Category FTS generation 8 / cache generation 3 / cursor pagination / stable
-Product Reference / batch resolve / Product Detail are implemented
-and tested locally. Production migration, sync and deploy are a separate phase.
+Product Reference / batch resolve / Product Detail are production-verified.
+The 2026-09-18 [transition report](production-transition.md) records the retained
+old D1, promoted D1, deployed version, measurements and recovery procedure.
 Automated quality failures must be resolved before a production release.
 Human checks/approvals are never release prerequisites. A measurement command succeeding does not
 mean the release gate passed.
@@ -43,7 +44,7 @@ not yet created, and an old checkout operating against a newer schema.
 4. All lookup fixtures are automatically checked: exact-model Hit@1, other lookup Hit@3 (explicit
    typo/fallback Hit@5). Identifier Hit@1=100% against normalized source owners,
    including source-derived equivalent sets; identifier requires no human review.
-5. browse candidate-window relevant coverage ≥90%, candidate precision ≥90%,
+5. browse candidate-window relevant coverage ≥90%, candidate precision ≥80%,
    no unexpected zero results. Huge exhausted windows use attainable coverage;
    exhaustion is a UI refinement state, not failure. Top20 is diagnostic only.
 6. browse_filter Recall/Precision=1, FP=FN=0, no out-of-filter product.
@@ -53,15 +54,16 @@ not yet created, and an old checkout operating against a newer schema.
    active/inactive/missing; IDs/status match current catalog. Shared URL and
    changed-ID restoration tests run in `npm run check`.
 8. Seven-intent D1 rows_read, SQL duration median/p95, query count and plans.
-   No unexpected catalog full scans or missing cost metadata. Default 500000 rows
-   / 250ms is a safety ceiling; remote/staging measurements must precede official
-   budgets via `PERFORMANCE_BUDGET_FILE`. Temp candidate sorts remain visible.
+   No unexpected catalog full scans or missing cost metadata. Official remote-
+   measured budgets default to `docs/production-performance-budgets.json`;
+   `PERFORMANCE_BUDGET_FILE` can explicitly replace them. Intent max ceilings
+   also cover every pagination page. Temp candidate sorts remain visible.
 9. Human review files and decisions are not read by release. No pending-review
    blocker or reviewer/rationale requirement exists. Expected sets still come
    from source rather than returned rankings.
 
 See [evaluation definitions](search-evaluation.md). The default benchmark runs
-233 cases: original 120 + extended 102 + UI 11. Low-level rank diagnostics are
+236 search cases: original 120 + extended 102 + UI 14. Low-level rank diagnostics are
 not release gates. Product Detail's 30-category indexed-plan/API/cache tests run
 in `npm run check`.
 

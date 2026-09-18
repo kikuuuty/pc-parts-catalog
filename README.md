@@ -18,8 +18,9 @@ saved/shared build → source + upstream_key
 FTSは`text, name, manufacturer, series, variant, family`、`unicode61`、prefix `2 3 4`です。
 他カテゴリの追加・削除は、そのカテゴリのBM25統計に影響しません。
 
-**今回の変更はローカル検証段階です。productionへのmigration・sync・deployは実行していません。**
-現行production APIとこのcheckoutのschema/API世代は異なります。
+**2026-09-18: production移行・HTTP検証完了。フロントエンドから利用開始できます。**
+API: **https://pc-parts-catalog.kikuuuty.workers.dev**。48,134製品／30カテゴリ、FTS世代8、migration 0001〜0009。
+切替・性能budget・復旧先・運用残件は[production移行記録](docs/production-transition.md)を参照してください。
 設計・30 FTS一覧は[検索アーキテクチャ](docs/category-search.md)、実測と残件は[ローカル検証結果](docs/category-search-validation.md)を参照してください。
 
 ## ローカル開始
@@ -160,7 +161,9 @@ npm run audit:duplicates -- --category gpu --manufacturer ASUS
 管理CLIはWrangler OAuthまたは`CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_TOKEN`を使用し、Worker runtimeはD1 bindingだけを使用します。
 
 release pipelineはmigration履歴・catalog/FTS integrity・UX品質・performance gateを通過したときだけ、同期IDからepochを生成してdeployします。
-次回releaseのepochは`sync-<id>-fts8-cache3`。現在のproduction epochは変更していません。migrationのproduction実行は別フェーズです。
+releaseのepochは`sync-<id>-fts8-cache3`。現在のproduction D1は`pc-parts-catalog-fts8`です。
+旧D1はrollback用に保持しています。intent別budgetは`docs/production-performance-budgets.json`が正式な既定値です。
+今回の変更をdefault branchへ公開するまで、旧checkoutからの自動releaseはD1 UUID不一致でfail-closedします。
 運用・復旧・credential設定は[release手順](docs/catalog-release.md)。
 
 ## ライセンスと出典
