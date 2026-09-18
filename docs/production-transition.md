@@ -1,5 +1,11 @@
 # Category FTS production transition — 2026-09-18
 
+This is the historical migration record. Promotion commit
+`b08c5b416cfdd48fc36a13c0a288e39abbe943b9` is now on default branch `main`;
+the repository binding matches promoted production D1 and scheduled/manual
+releases can use FTS8. Discovery and execution measurements below describe
+the transition, not an outstanding publication step.
+
 ## Read-only discovery / target
 
 Production DB `180175e0-edc0-49df-a9d7-5958d5982e8f` has migrations
@@ -232,7 +238,7 @@ https://pc-parts-catalog.kikuuuty.workers.dev.**
 |26|Shared build|CPU/motherboard/DDR5 memory/GPU/storage/PSU/case → refs → URL → parse → resolve → current IDs → Detail PASS|
 |27|Production performance|Bounded 45-case seven-intent suite within all p95/max/query-count budgets; full scans 0|
 |28|Production release gate|Full source integrity, 45 query-plan checks, 30 FTS readiness and bounded UX/detail/resolve PASS after deploy|
-|29|Known issues|Cold Detail HTTP latency; sparse/source-conflicting identifiers; inactive has no safe production fixture; default-branch publication pending (below)|
+|29|Known issues at promotion|Cold Detail HTTP latency; sparse/source-conflicting identifiers; inactive has no safe production fixture|
 |30|Frontend guidance|Use production origin, durable pair for storage, current ID for Detail, string identifiers, cursor reset on epoch change, respect 429/Retry-After|
 
 ### HTTP elapsed (ms; caller at NRT, including response body)
@@ -254,10 +260,11 @@ the measured smoke returned their expected success status; no retry inflation.
 
 Search GET and Detail samples mix HIT/MISS; all advanced search and resolver
 requests bypass cache. Production Detail had 4 HIT / 7 MISS, while staging had
-7 / 7: **the differing medians do not indicate a SQL regression**. Detail makes
-four sequential indexed D1 calls; cold HTTP commonly costs ~370–400ms from this
-location. Selection/loading UI should account for it. Optimization is outside
-this migration. Search/detail cache identity includes API generation and epoch;
+7 / 7: **the differing medians do not indicate a SQL regression**. At promotion,
+Detail made four sequential indexed D1 calls; cold HTTP commonly
+cost ~370–400ms from this location. Subsequent batching and separate diagnostic
+measurements are recorded in [Detail cleanup](product-detail-performance.md).
+Search/detail cache identity includes API generation and epoch;
 the pre-warmed old search namespace cannot be used by this generation.
 
 ### Correctness and price-provider readiness
@@ -286,11 +293,15 @@ covered locally; production records were not mutated to manufacture a fixture.
 ### Automation, monitoring and remaining work
 
 Repository variable `CLOUDFLARE_D1_DATABASE_ID` now equals the new production
-UUID. An old default-branch config fails its existing mismatch guard before
-sync/deploy. The local changes have **not been committed/pushed**: publishing
-them to the default branch is the remaining step for scheduled releases to use
-this generation. There is no new human approval gate. Until publication, the
-live API is available on the fixed snapshot; old automated releases fail closed.
+UUID, matching `wrangler.json` on `main`. Production promotion commit
+`b08c5b416cfdd48fc36a13c0a288e39abbe943b9` has been pushed to the default branch,
+so scheduled/manual release workflows can use this generation through the normal
+automated gates. There is no new human approval gate.
+
+During transition, the repository variable was updated before publication of
+the matching config. An old checkout then failed closed on D1 UUID mismatch
+before sync/deploy. This was a migration safeguard, not a current release blocker;
+the mismatch guard remains useful against stale checkouts.
 
 `npm run check`: 175/175 PASS after budget/binding updates. Diagnostics launched
 with `--case cpu-9800x3d`, performed the local case evaluation on the identical

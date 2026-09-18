@@ -163,7 +163,8 @@ npm run audit:duplicates -- --category gpu --manufacturer ASUS
 release pipelineはmigration履歴・catalog/FTS integrity・UX品質・performance gateを通過したときだけ、同期IDからepochを生成してdeployします。
 releaseのepochは`sync-<id>-fts8-cache3`。現在のproduction D1は`pc-parts-catalog-fts8`です。
 旧D1はrollback用に保持しています。intent別budgetは`docs/production-performance-budgets.json`が正式な既定値です。
-今回の変更をdefault branchへ公開するまで、旧checkoutからの自動releaseはD1 UUID不一致でfail-closedします。
+production promotion commit `b08c5b416cfdd48fc36a13c0a288e39abbe943b9` はdefault branch `main`へpush済みです。
+repositoryのD1 bindingは昇格済みproduction D1と一致し、scheduled/manual releaseはFTS8 generationを使用できます。
 運用・復旧・credential設定は[release手順](docs/catalog-release.md)。
 
 ## ライセンスと出典

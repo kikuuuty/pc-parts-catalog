@@ -135,31 +135,47 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
       });
       const event = { event: 'catalog_api', request_id: requestId, route: 'unknown', method: request.method,
         cache_status: 'BYPASS', rate_limit_status: 'not_checked', rate_limit_class: 'none', search_cost_class: 'not_classified',
-        d1_queries: 0, rows_read: 0, rows_written: 0, sql_duration_ms: null };
+        d1_queries: 0, d1_operations: 0, rows_read: 0, rows_written: 0, sql_duration_ms: null };
       let status = 200;
       let payload;
       let cachedBody;
-      const execute = async (sql, params = []) => {
+      const executeStatements = async (statements, batch = false) => {
         if (!env.DB?.prepare) throw new Error('Missing binding');
-        event.d1_queries++;
-        const previous = { rows_read: event.rows_read, rows_written: event.rows_written, duration: event.d1_queries === 1 ? 0 : event.sql_duration_ms };
+        const useBatch = batch && typeof env.DB.batch === 'function';
+        const previous = { rows_read: event.rows_read, rows_written: event.rows_written, duration: event.d1_queries === 0 ? 0 : event.sql_duration_ms };
+        // Queries count SQL statements, operations count binding calls (.all/batch).
+        event.d1_queries += statements.length;
+        event.d1_operations += batch && !useBatch ? statements.length : 1;
         // A failed query has unknown cost; only successful D1 metadata establishes it.
-        event.rows_read = event.rows_written = null;
-        let result;
+        event.rows_read = event.rows_written = event.sql_duration_ms = null;
+        headers.delete('Server-Timing');
+        let results;
         try {
-          result = await env.DB.prepare(sql).bind(...params).all();
-          if (result.success === false) throw new Error(result.error ?? 'D1_ERROR');
+          const prepared = statements.map(({ sql, params }) => env.DB.prepare(sql).bind(...params));
+          // Query-only local diagnostic adapters can run the independent reads
+          // concurrently; production D1 always provides batch(). Aggregate after
+          // all reads finish so parallel completions cannot race telemetry sums.
+          results = useBatch ? await env.DB.batch(prepared) : await Promise.all(prepared.map(statement => statement.all()));
+          if (results.length !== statements.length) throw new Error('D1_ERROR');
+          for (const result of results) if (result.success === false) throw new Error(result.error ?? 'D1_ERROR');
         } catch (error) {
           // Classify transient failures without returning/logging the D1 message or SQL.
           const transient = /timeout|timed out|overload|temporar|unavailable|reset|network|fetch failed|quota|limit exceeded|too many requests|D1_ERROR.*(?:busy|locked)/i.test(error.message ?? '');
           throw new HttpError(transient ? 503 : 500, transient ? 'DATABASE_UNAVAILABLE' : 'DATABASE_ERROR', transient ? 'Database temporarily unavailable' : 'Database request failed');
         }
-        const meta = result.meta ?? {};
         const sum = (a, b) => a === null || finite(b) === null ? null : a + b;
-        Object.assign(event, { rows_read: sum(previous.rows_read, meta.rows_read), rows_written: sum(previous.rows_written, meta.rows_written), sql_duration_ms: sum(previous.duration, meta.duration) });
+        for (const result of results) {
+          const meta = result.meta ?? {};
+          previous.rows_read = sum(previous.rows_read, meta.rows_read);
+          previous.rows_written = sum(previous.rows_written, meta.rows_written);
+          previous.duration = sum(previous.duration, meta.duration);
+        }
+        Object.assign(event, { rows_read: previous.rows_read, rows_written: previous.rows_written, sql_duration_ms: previous.duration });
         if (event.sql_duration_ms !== null) headers.set('Server-Timing', `d1;dur=${event.sql_duration_ms}`);
-        return result.results;
+        return results.map(result => result.results);
       };
+      const execute = async (sql, params = []) => (await executeStatements([{ sql, params }]))[0];
+      const executeBatch = statements => executeStatements(statements, true);
       try {
         if (request.url.length > 4096) invalid('URL is too long');
         const url = new URL(request.url);
@@ -196,7 +212,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
             if (cachedBody === undefined) {
               const release = await protectSearch(env, event, {}, 'GET', key, refillGuard);
               try {
-                payload = await loadProductDetail(execute, id);
+                payload = await loadProductDetail(execute, id, executeBatch);
                 if (!payload) throw new HttpError(404, 'PRODUCT_NOT_FOUND', 'Product not found');
                 if (key) {
                   try { await writeSearchCache(cache, key, JSON.stringify(payload), policy.ttl, now()); }

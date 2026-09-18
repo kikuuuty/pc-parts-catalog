@@ -35,13 +35,16 @@ export function productDetailCache(url, id, env) {
   return { ttl, key: new Request(key) };
 }
 
-export async function loadProductDetail(execute, id) {
+export async function loadProductDetail(execute, id, executeBatch) {
   const [product] = await execute(detailProductQuery.sql, [id]);
   if (!product) return null;
   const queries = detailQueries(product.category);
-  const [spec] = await execute(queries.spec, [id]);
-  const identifiers = canonicalIdentifiers(await execute(queries.identifiers, [id]));
-  const facets = await execute(queries.facets, [id]);
+  const statements = Object.values(queries).map(sql => ({ sql, params: [id] }));
+  // Worker uses one D1 batch; CLI/read-only adapters retain their query interface.
+  const [[spec], identifierRows, facets] = executeBatch
+    ? await executeBatch(statements)
+    : await Promise.all(statements.map(({ sql, params }) => execute(sql, params)));
+  const identifiers = canonicalIdentifiers(identifierRows);
   return { ...product, identifiers,
     spec: Object.fromEntries(Object.keys(models[product.category].fields).map(k => [k, spec?.[k] ?? null])), facets };
 }

@@ -6,6 +6,10 @@ Category FTS generation 8 / cache generation 3 / cursor pagination / stable
 Product Reference / batch resolve / Product Detail are production-verified.
 The 2026-09-18 [transition report](production-transition.md) records the retained
 old D1, promoted D1, deployed version, measurements and recovery procedure.
+Promotion commit `b08c5b416cfdd48fc36a13c0a288e39abbe943b9` is published on
+default branch `main`. The repository production binding matches the promoted
+D1 (`0d64ee1a-6ead-4bfd-9dfd-91535e5b3030`); scheduled and manual releases can
+use FTS8 through the existing gates.
 Automated quality failures must be resolved before a production release.
 Human checks/approvals are never release prerequisites. A measurement command succeeding does not
 mean the release gate passed.
@@ -66,6 +70,15 @@ See [evaluation definitions](search-evaluation.md). The default benchmark runs
 236 search cases: original 120 + extended 102 + UI 14. Low-level rank diagnostics are
 not release gates. Product Detail's 30-category indexed-plan/API/cache tests run
 in `npm run check`.
+
+Product Detail still counts four SQL statements against `max_query_count=4`.
+The Worker performs two D1 binding operations: product `.all()`, then one
+`batch()` for spec/identifiers/facets. Runtime `d1_queries` counts statements;
+additive `d1_operations` counts binding calls (not provider-internal retries).
+`rows_read` and SQL duration sum all statement metadata, including each batch
+result. The direct-D1 quality adapter measures statements independently; its
+query count is not the Worker's remote round-trip count. See the
+[Detail cleanup measurement](product-detail-performance.md).
 
 ## Epoch, cache and identity
 
