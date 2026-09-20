@@ -56,6 +56,7 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 |---|---|
 |`GET /v1/health`|D1接続確認|
 |`GET /v1/categories`|registry由来の30カテゴリ|
+|`GET /v1/categories/:category/filters`|UI向けfilter定義・active catalogの選択肢・数値範囲|
 |`GET /v1/search?category=cpu&q=9800X3D`|簡易検索|
 |`POST /v1/search`|keyword、typed filters、ranges、facets、identifier、orderBy|
 |`GET /v1/products/:id`|選択した製品の詳細とcanonical identifiers|
@@ -83,6 +84,11 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 - `window_exhausted=true`は絞り込みを促すUI状態です。詳細は[pagination契約](docs/pagination.md)。
 - keyword GET検索は標準20件・先頭6ページだけedge cache。cursor・POST・resolveはBYPASS。ブラウザ向けは`no-store`、CORS `*`。
 - 詳細なHTTP契約は[API文書](docs/cloudflare-production.md)、Product Detailは[詳細API文書](docs/product-detail.md)。
+
+カテゴリ別filter UIは`GET /v1/categories/:category/filters`の`control`・`target`・`value_type`・`options` / `range`から構築できます。
+メーカーを含むcurated定義をbackendで管理し、選択値を`POST /v1/search`の`filters` / `ranges` / `facets`へ送ります。
+候補はactive catalog全体が基準で、現在の検索条件によるdynamic facet countsではありません。
+空の候補・range、cache、カテゴリ別項目、送信例は[Filter metadata API](docs/category-filters.md)を参照してください。
 
 **numeric id = current DB/runtime ID、source + upstream_key = durable shared reference**。
 search/detailの両responseにidentity fieldsを含みます。共有URL・保存構成・favorites・localStorage・export/importはpairを保存し、復元時にbatch resolveします。

@@ -2,8 +2,8 @@ import { models, ftsName } from './model.js';
 import { identifierKey } from './normalize.js';
 import { parseSearchIntent, specSeed } from './search-intent.js';
 import { displayTerms, validateSortValues } from './pagination.js';
+import { commonSearchFields, scalarField } from './search-fields.js';
 
-const common = { name: 'TEXT', manufacturer: 'TEXT', series: 'TEXT', variant: 'TEXT', release_year: 'INTEGER' };
 const productColumns = ['id', 'source', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
 const productProjection = `${productColumns.map(field => `p.${field}`).join(',')},s.*`;
 // Immutable schema-derived SQL fragments, not a query/result cache. Reuse them
@@ -102,11 +102,8 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   const index = ftsName(category);
   if (orderBy === 'relevance') orderBy = undefined;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be 1–100');
-  const fields = { ...common, ...model.fields };
-  const column = key => {
-    if (!Object.hasOwn(fields, key)) throw new Error(`Unknown ${category} filter: ${key}`);
-    return `${Object.hasOwn(model.fields, key) ? 's' : 'p'}.${key}`;
-  };
+  const fields = { ...commonSearchFields, ...model.fields };
+  const column = key => scalarField(model, key).column;
   const where = ['p.active=1', 'p.category=?'];
   const params = [category];
   for (const [key, raw] of Object.entries(filters)) {

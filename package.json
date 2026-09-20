@@ -29,6 +29,7 @@
     "release:sync": "node scripts/catalog-release.js sync",
     "verify:api": "node scripts/verify-api.js",
     "verify:worker:local": "node scripts/verify-worker-local.js",
+    "verify:filters:local": "node scripts/verify-filters.js",
     "verify:protection": "node --test test/search-protection.test.js",
     "schema:generate": "node scripts/generate-schema.js",
     "schema:check": "node scripts/generate-schema.js --check",

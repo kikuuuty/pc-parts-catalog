@@ -62,16 +62,23 @@ try {
     }
   }
   if (interrupted) throw new Error('Verification interrupted');
-  console.log('Worker ready. Running intent-suite HTTP/direct-D1 comparison and 30-category Detail contract (deadline 900s).');
-  verification = spawn(process.execPath, ['scripts/verify-api.js', '--url', origin, '--smoke', '--golden', '--paced', '--output', args.output], {
-    stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
-  });
-  const exit = await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { void stop(verification); reject(new Error('HTTP verification exceeded 900s')); }, 900_000);
-    verification.once('error', error => { clearTimeout(timer); reject(error); });
-    verification.once('exit', code => { clearTimeout(timer); resolve(code); });
-  });
-  if (exit !== 0 || interrupted) throw new Error(`HTTP verification failed (exit ${exit})`);
+  // The expanded Golden + 30-category Detail suite exceeds 900s at the existing
+  // 3.5s protection-aware pacing. Keep that pacing and allow a bounded 30 minutes.
+  console.log('Worker ready. Running search/Detail and 30-category filter HTTP/direct-D1 contracts (deadline 1800s per job).');
+  for (const command of [
+    ['scripts/verify-api.js', '--url', origin, '--smoke', '--golden', '--paced', '--output', args.output],
+    ['scripts/verify-filters.js', '--url', origin],
+  ]) {
+    verification = spawn(process.execPath, command, {
+      stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',
+    });
+    const exit = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { void stop(verification); reject(new Error('HTTP verification exceeded 1800s')); }, 1_800_000);
+      verification.once('error', error => { clearTimeout(timer); reject(error); });
+      verification.once('exit', code => { clearTimeout(timer); resolve(code); });
+    });
+    if (exit !== 0 || interrupted) throw new Error(`HTTP verification failed (exit ${exit})`);
+  }
 } finally {
   await stop(verification);
   await stop(worker);

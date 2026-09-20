@@ -5,6 +5,7 @@ import { protectSearch, protectHealth, ProtectionError, createRefillGuard } from
 import { loadProductDetail, productDetailCache } from './product-detail.js';
 import { searchWindow, cursorContext, decodeCursor, encodeCursor } from './pagination.js';
 import { validateReferences, resolveProducts } from './product-reference.js';
+import { loadFilterMetadata, filterMetadataCache } from './filter-metadata.js';
 
 const MAX_BODY = 16 * 1024;
 const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'], '/v1/products/resolve':['POST'] };
@@ -180,9 +181,10 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         if (request.url.length > 4096) invalid('URL is too long');
         const url = new URL(request.url);
         const detailMatch = /^\/v1\/products\/([1-9]\d*)$/.exec(url.pathname);
-        const methods = detailMatch ? ['GET'] : Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
+        const filterMatch = /^\/v1\/categories\/([^/]+)\/filters$/.exec(url.pathname);
+        const methods = detailMatch || filterMatch ? ['GET'] : Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
         if (!methods) throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found');
-        event.route = detailMatch ? '/v1/products/:id' : url.pathname;
+        event.route = filterMatch ? '/v1/categories/:category/filters' : detailMatch ? '/v1/products/:id' : url.pathname;
         headers.set('Allow', [...methods, 'OPTIONS'].join(', '));
         if (request.method === 'OPTIONS') {
           const method = request.headers.get('access-control-request-method');
@@ -195,7 +197,35 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         } else {
           if (!methods.includes(request.method)) throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
           if (url.pathname !== '/v1/search' && url.search) invalid('This endpoint accepts no query parameters');
-          if (detailMatch) {
+          if (filterMatch) {
+            const category = filterMatch[1];
+            if (!categories.includes(category)) throw new HttpError(404, 'CATEGORY_NOT_FOUND', 'Category not found');
+            event.category = category;
+            const policy = filterMetadataCache(url, category, env);
+            const cache = injectedCache ?? globalThis.caches?.default;
+            const key = cache && policy?.key;
+            if (key) {
+              event.cache_status = 'MISS';
+              headers.set('X-Cache-TTL', String(policy.ttl));
+              try {
+                const hit = await readSearchCache(cache, key, policy.ttl, now());
+                if (hit) { cachedBody = hit.body; event.cache_status = 'HIT'; headers.set('Age', String(hit.age)); }
+              } catch { event.cache_status = 'BYPASS'; event.cache_error = 'match'; }
+            }
+            if (cachedBody === undefined) {
+              const release = await protectSearch(env, event, { category }, 'GET', key, refillGuard);
+              try {
+                payload = await loadFilterMetadata(executeBatch, category);
+                if (key) {
+                  try { await writeSearchCache(cache, key, JSON.stringify(payload), policy.ttl, now()); }
+                  catch { event.cache_status = 'BYPASS'; event.cache_error = 'put'; }
+                }
+              } finally { release(); }
+            }
+            // Revalidate the stable public URL; only the epoch-keyed internal cache
+            // has a freshness lifetime, so browsers cannot retain an old release.
+            headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
+          } else if (detailMatch) {
             const id = Number(detailMatch[1]);
             if (!Number.isSafeInteger(id)) invalid('Invalid product ID');
             const policy = productDetailCache(url, id, env);
