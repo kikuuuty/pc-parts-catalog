@@ -11,9 +11,25 @@ import { catalogState } from '../src/quality/catalog.js';
 import { cacheEpoch, productionConfig, withReleaseLease, assertGolden, readiness, migrationGate, FTS_GENERATION } from '../scripts/lib/release-gates.js';
 import { assertDeployedVars } from '../scripts/lib/cloudflare-release.js';
 import { pacedRequests } from '../scripts/lib/production-smoke.js';
+import { categoryCountBounds, categoryCountDeltaError } from '../scripts/lib/category-count-guard.js';
 
 const commit = 'a'.repeat(40);
 const record = () => normalize('cpu', { opendb_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', metadata: { name: 'AMD Ryzen 7 9800X3D', manufacturer: 'AMD' } }, commit);
+
+test('category count guard allows small-category growth while preserving ratio and decrease bounds', () => {
+  for (const [previous, current] of [[1, 7], [1, 11], [10, 20], [100, 150], [4000, 6000], [100, 80]]) {
+    assert.equal(categoryCountDeltaError('stand', previous, current), null);
+  }
+  for (const [previous, current] of [[1, 12], [10, 21], [100, 151], [4000, 6001], [100, 79]]) {
+    assert.match(categoryCountDeltaError('example', previous, current), /^Unexpected category count delta: example /);
+  }
+  assert.deepEqual(categoryCountBounds(1), { min: 0.8, max: 11 });
+  assert.deepEqual(categoryCountBounds(10), { min: 8, max: 20 });
+  assert.deepEqual(categoryCountBounds(4000), { min: 3200, max: 6000 });
+  assert.equal(categoryCountDeltaError('stand', 1, 7), null, 'stand 1 -> 7 is a valid upstream increase');
+  assert.equal(categoryCountDeltaError('gpu', 4000, 6001), 'Unexpected category count delta: gpu 4000 -> 6001 (allowed 3200..6000)');
+  assert.equal(categoryCountDeltaError('gpu', 100, 79), 'Unexpected category count delta: gpu 100 -> 79 (allowed 80..150)');
+});
 
 test('actual CLI retry preserves immutable pin artifact separately from report and never re-resolves upstream', async t => {
   await mkdir('.cache', { recursive: true });

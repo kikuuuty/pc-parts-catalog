@@ -11,6 +11,7 @@ import { catalogState } from '../src/quality/catalog.js';
 import { productionConfig, migrationGate, readiness, searchGate, safeDatabase, withReleaseLease, releaseIdentity } from './lib/release-gates.js';
 import { cloudflareRelease, assertDeployedVars, wrangler } from './lib/cloudflare-release.js';
 import { verifyProduction } from './lib/production-smoke.js';
+import { categoryCountDeltaError } from './lib/category-count-guard.js';
 
 const { positionals: [command], values: args } = parseArgs({ allowPositionals: true, options: {
   local: { type: 'boolean', default: false },
@@ -65,7 +66,10 @@ async function sync(db) {
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   assert(total >= 20000 && total <= 100000, 'Snapshot count outside reviewed envelope');
   const previous = (await db.query('SELECT category,count(*) AS n FROM products WHERE active=1 GROUP BY category')).results;
-  for (const row of previous) assert(counts[row.category] >= row.n * 0.8 && counts[row.category] <= row.n * 1.5, 'Unexpected category count delta; review upstream');
+  for (const row of previous) {
+    const error = categoryCountDeltaError(row.category, row.n, counts[row.category]);
+    assert.equal(error, null, error ?? undefined);
+  }
   stage('production sync');
   const result = await syncSnapshot(db, snapshot, { maxProducts, writeBudget, reuseComplete: true, baseSyncId: pinned.base_sync_id });
   await writeFile('.cache/sync-report.json', JSON.stringify(result, null, 2) + '\n');
