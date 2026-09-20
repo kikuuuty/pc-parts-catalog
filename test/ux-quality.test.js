@@ -30,6 +30,29 @@ test('recall/precision denominators, contamination, empty results and equivalent
   assert.deepEqual(setMetrics([3,1],[1,3]),setMetrics([1,3],[1,3]));
 });
 
+test('AULA range fixture follows source spec enrichment across snapshots and still detects missing retrieval', async t => {
+  const db = database(); t.after(() => db.sqlite.close());
+  const a = 'a'.repeat(40), b = 'b'.repeat(40);
+  const items = ['AULA F75 Existing', 'AULA F75 MAX Black', 'AULA F75 Low Polling', 'Other Keyboard'];
+  const ids = items.map(() => randomUUID());
+  const sourceFor = commit => ({ commit, records: items.map((name, n) => normalize('keyboard', {
+    opendb_id: ids[n], metadata: { name }, polling_rate: n === 1 ? (commit === a ? undefined : 1000) : n === 2 ? 125 : 1000,
+  }, commit)) });
+  const item = (await loadUXFixture()).fixture.find(r => r.id === 'ext-keyboard-12');
+  assert.deepEqual(item.relevant, { set: { nameTokens: ['AULA'] } });
+  for (const [commit, count] of [[a, 1], [b, 2]]) {
+    const snapshot = sourceFor(commit); await syncSnapshot(db, snapshot);
+    const catalog = await loadQualityCatalog(db), source = sourceCatalog(snapshot, catalog);
+    const result = await evaluateUX(db, catalog, [item], { source, operations: false });
+    assert.equal(result.results[0].relevant_count, count);
+    assert.equal(result.results[0].false_positive_count, 0); assert.equal(result.results[0].false_negative_count, 0);
+  }
+  db.sqlite.exec('DELETE FROM keyboard_fts WHERE rowid=2');
+  const catalog = await loadQualityCatalog(db);
+  const broken = await evaluateUX(db, catalog, [item], { source: sourceCatalog(sourceFor(b), catalog), operations: false });
+  assert(qualityFailures(broken).includes('ext-keyboard-12: filtered set mismatch'));
+});
+
 test('source MPN equivalence excludes bundle and special edition; compact family is not SKU equivalence',async t=>{
   const db=database();t.after(()=>db.sqlite.close());const commit='a'.repeat(40);
   const records=[['G502 HERO','910-005469'],['G502 HERO Black','910-005469'],['G502 HERO Bundle','BUNDLE'],['G502 HERO KDA','910-006095']].map(([name,mpn])=>normalize('mouse',{opendb_id:randomUUID(),metadata:{manufacturer:'Logitech',name,part_numbers:[mpn]}},commit));

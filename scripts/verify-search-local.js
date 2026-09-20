@@ -69,8 +69,9 @@ try {
   const integrity=await ftsIntegrity(db);assert(integrity.pass);assert.equal(integrity.active_products,48134);await save('integrity.json',integrity);
   await save('readiness.json',await readiness(db,{commit:snapshot.commit,expectedCounts:Object.fromEntries(Object.entries(snapshot.report.categories).map(([c,r])=>[c,r.count]))}));
   const catalog=await loadQualityCatalog(db), expected=sourceCatalog(snapshot,catalog);
-  const catalogIntegrity=await verifySourceCatalog(db,catalog,snapshot);assert(catalogIntegrity.pass);
+  const catalogIntegrity=await verifySourceCatalog(db,catalog,snapshot);
   await save('catalog-integrity.json',catalogIntegrity);
+  assert(catalogIntegrity.pass);
   const input=await loadUXFixture();fixture=input.fixture;const hash=input.hash;
   const quality=await evaluateUX(db,catalog,fixture,{fixtureHash:hash,source:expected});
   quality.release_failures=qualityFailures(quality);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { remoteDatabaseId } from '../../src/remote-config.js';
@@ -9,9 +9,12 @@ import { NORMALIZER_VERSION, categories, models } from '../../src/model.js';
 import { catalogState, assertCatalogState, loadQualityCatalog } from '../../src/quality/catalog.js';
 import { loadUXFixture, evaluateUX, qualityFailures, sourceCatalog } from '../../src/quality/ux.js';
 import { loadSnapshot } from '../../src/upstream.js';
-import { verifySourceCatalog } from '../../src/quality/integrity.js';
 import { ftsIntegrity } from './fts-integrity.js';
 import { verifyPlans } from '../../src/queries.js';
+import path from 'node:path';
+import { sourceIntegrityGate } from './source-integrity-gate.js';
+import { verifyFilterMetadata } from './filter-verification.js';
+import { saveValidationReport } from './validation-report.js';
 
 export const FTS_GENERATION = 8;
 export function productionConfig(config, env = process.env) {
@@ -87,31 +90,52 @@ export async function readiness(db, { commit, expectedCounts } = {}) {
 export function assertGolden(report) {
   assert.deepEqual(qualityFailures(report), [], 'UX release gate failed');
 }
-export async function searchGate(db, { representative = false, output = '.cache/release-ux-report.json' } = {}) {
-  const plans = await verifyPlans(db);
+export async function searchGate(db, { representative = false, output = '.cache/release-ux-report.json', snapshot: suppliedSnapshot, onPhase = () => {} } = {}) {
+  const phases = { source_integrity: 'not_run', filter_metadata: 'not_run', search_quality: 'not_run', query_plans: 'not_run' };
+  let current, report = { schema_version: 1, phases };
+  const phase = name => { current = name; phases[name] = 'running'; onPhase(name, 'running'); };
+  const passed = () => { phases[current] = 'passed'; onPhase(current, 'passed'); };
+  try {
+  phase('source_integrity');
   const catalog = await loadQualityCatalog(db);
+  const snapshot = suppliedSnapshot ?? await loadSnapshot();
+  Object.assign(report, { snapshot_commit: snapshot.commit, sync: catalog.metadata.last_sync });
+  report.source_integrity = await sourceIntegrityGate(db, catalog, snapshot, path.join(path.dirname(output), 'release-source-integrity.json'));
+  passed();
+  phase('filter_metadata');
+  report.filter_metadata = await verifyFilterMetadata(db, { snapshot, output: path.join(path.dirname(output), 'release-filter-metadata.json'), measurement: catalog.metadata.served_by ?? 'D1 adapter (location unknown)' });
+  passed();
+  phase('search_quality');
   const { fixture: fullFixture, hash } = await loadUXFixture();
   const selected = new Set(['cpu-9800x3d','ux-dt990-pro250','ux-mag','ux-meshify','ux-mag-atx-b850','ux-oled-27-4k','ux-board-atx-b850','ux-memory-ddr5-32','ux-board-empty',
     ...fullFixture.filter(r=>r.intent==='identifier').slice(0,2).map(r=>r.id)]);
   const fixture = representative ? fullFixture.filter(r=>selected.has(r.id)) : fullFixture;
   if(representative) assert.equal(fixture.length,11,'Representative fixture coverage changed');
-  const snapshot=await loadSnapshot();
-  assert.equal(snapshot.commit,catalog.metadata.last_sync?.source_commit,'Evaluation snapshot differs');
-  const sourceIntegrity=await verifySourceCatalog(db,catalog,snapshot);
-  assert(sourceIntegrity.pass,'Source catalog integrity failed');
-  const report = await evaluateUX(db, catalog, fixture, { fixtureHash: hash,source:sourceCatalog(snapshot,catalog) });
+  Object.assign(report, await evaluateUX(db, catalog, fixture, { fixtureHash: hash,source:sourceCatalog(snapshot,catalog) }));
   const budgetFile=process.env.PERFORMANCE_BUDGET_FILE || 'docs/production-performance-budgets.json';
   const budgets=JSON.parse(await readFile(budgetFile,'utf8'));
   report.measurement={profile:representative?'bounded-production':'full',budget_file:budgetFile,budgets,measured_at:new Date().toISOString()};
   report.release_failures=qualityFailures(report,{budgets});
   report.diagnostic_commands=[...new Set(report.release_failures.map(f=>f.split(':')[0]))].filter(id=>report.results.some(r=>r.id===id)).map(id=>`npm run diagnose:search -- --case ${id}`);
-  report.source_integrity=sourceIntegrity;
-  report.plans=plans;
-  await writeFile(output,JSON.stringify(report,null,2)+'\n');
+  await saveValidationReport(output,report);
   for(const command of report.diagnostic_commands)console.log(command);
-  assert(plans.length > 0 && plans.every(r => r.index_check), 'Query plan gate failed');
   assert.deepEqual(report.release_failures,[],'UX release gate failed');
-  return { golden: report.by_intent, plans: plans.length };
+  passed();
+  phase('query_plans');
+  report.plans = await verifyPlans(db);
+  await saveValidationReport(output,report);
+  assert(report.plans.length > 0 && report.plans.every(r => r.index_check), 'Query plan gate failed');
+  passed();
+  await saveValidationReport(output,report);
+  return { golden: report.by_intent, plans: report.plans.length, validation: phases,
+    filter_metadata: { status: 'passed', categories: report.filter_metadata.categories.length, rows_read: report.filter_metadata.rows_read } };
+  } catch (error) {
+    if (current && phases[current] === 'running') { phases[current] = 'failed'; onPhase(current, 'failed'); }
+    if (error.sourceIntegrityReport) report.source_integrity = error.sourceIntegrityReport;
+    if (error.filterMetadataReport) report.filter_metadata = error.filterMetadataReport;
+    await saveValidationReport(output, report, error);
+    throw error;
+  }
 }
 
 export async function releaseIdentity(config, epoch) {

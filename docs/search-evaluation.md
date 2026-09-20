@@ -12,6 +12,21 @@ Normalized source records, not search results, supply relevant sets. Missing DB
 products remain in the denominator. Source verification checks raw data, product
 fields, category, active state, typed specs, identifiers and facets.
 
+Release evaluation uses the validated snapshot matching the completed sync, not
+always that historical fixture-authoring snapshot. Product `source_commit` is
+last-row-update provenance and is the sole excluded canonical field; completed
+`sync_runs.source_commit` must still equal the evaluation snapshot.
+
+`ext-keyboard-12` retains the original `aula` + polling_rate_hz >= 1000 search and
+exact filtered-set floor. Its UX relevance overlay now expresses the original
+source rule as `nameTokens: ["AULA"]`, intersected with the existing range, rather
+than freezing the 19 IDs from snapshot A. Snapshot B legitimately fills polling
+rate for five AULA F75 MAX variants, giving 24 source matches. The frozen extended
+fixture/evidence stays intact; no ID whitelist for B, skipped case, ranking change
+or reduced floor is introduced. A regression test covers enrichment entering the
+set and still detects a missing FTS document. Details/evidence are in
+[incremental release validation](incremental-release-validation.md).
+
 The 120 legacy + 102 extended + 11 frontend cases retain the five intents:
 lookup, identifier, browse, browse_filter, filter_only. The frozen source files
 are retained; `search-ux-overrides.json` describes the ten UX reclassifications.

@@ -2,6 +2,7 @@ name: Catalog checks
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
@@ -25,9 +26,9 @@ jobs:
         run: npm run verify:catalog
       - run: npm run audit:completeness -- --output .cache/completeness.json
       - run: npm run audit:duplicates -- --output .cache/duplicates.json
-      - name: Record source-grounded search intent metrics
-        run: npm run benchmark:search -- --output .cache/search-ux.json
-      - name: Enforce intent release gates and dry-run release config
+      # One shared gate computes source integrity, real-snapshot Filter metadata,
+      # all search intent metrics and plans (do not benchmark the same data twice).
+      - name: Enforce source, Filter metadata and search release gates
         run: npm run release:verify -- --local
       - uses: actions/upload-artifact@v4
         if: always()
@@ -41,6 +42,33 @@ jobs:
             .cache/sync-report.json
             .cache/completeness.json
             .cache/duplicates.json
-            .cache/release-verify-report.json
-            .cache/search-ux.json
+            .cache/release-*.json
+          retention-days: 7
+  cross-snapshot:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Isolated pinned A to B delta sync, full release gates and Worker HTTP
+        run: npm run verify:release:cross-snapshot
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cross-snapshot-release-verification
+          include-hidden-files: true
+          path: |
+            .cache/cross-snapshot-latest.json
+            .cache/cross-snapshot-*/report.json
+            .cache/cross-snapshot-*/manifest.json
+            .cache/cross-snapshot-*/source-a-integrity.json
+            .cache/cross-snapshot-*/source-*/inspection.json
+            .cache/cross-snapshot-*/source-*/upstream-categories.json
+            .cache/cross-snapshot-*/release-*.json
+            .cache/cross-snapshot-*/worker.*.log
           retention-days: 7

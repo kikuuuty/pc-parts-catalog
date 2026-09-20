@@ -21,16 +21,16 @@ export function categoryCoverage(directories, schemas, registry = models) {
     missing_upstream: defined.filter(name => !upstream.includes(name)),
   };
 }
-export async function inspectCategories(repo = defaultRepo) {
+export async function inspectCategories(repo = defaultRepo, { reportDirectory = '.cache' } = {}) {
   // Inspect Git's complete tree, never just the sparse worktree. A new category
   // must be visible even before it is included in our explicit checkout list.
   const directories = git(repo, ['ls-tree', '-d', '--name-only', 'HEAD:open-db']).split('\n').filter(Boolean);
   const schemas = git(repo, ['ls-tree', '--name-only', 'HEAD:schemas']).split('\n').filter(name => name.endsWith('.schema.json')).map(name => name.slice(0, -12));
   const coverage = categoryCoverage(directories, schemas);
-  await mkdir('.cache', { recursive: true });
-  await writeFile('.cache/upstream-categories.json', JSON.stringify({ commit: git(repo, ['rev-parse', 'HEAD']), ...coverage }, null, 2));
+  await mkdir(reportDirectory, { recursive: true });
+  await writeFile(path.join(reportDirectory, 'upstream-categories.json'), JSON.stringify({ commit: git(repo, ['rev-parse', 'HEAD']), ...coverage }, null, 2));
   if (['unsupported', 'missing_directories', 'missing_schemas', 'missing_upstream'].some(key => coverage[key].length)) {
-    throw new Error(`Upstream category/schema coverage mismatch: ${JSON.stringify(coverage)}. See .cache/upstream-categories.json`);
+    throw new Error(`Upstream category/schema coverage mismatch: ${JSON.stringify(coverage)}. See ${path.join(reportDirectory, 'upstream-categories.json')}`);
   }
   return coverage;
 }
@@ -44,7 +44,7 @@ export function assertModelSchema(model, schema) {
     if (![field?.type].flat().includes('array')) throw new Error(`${model.upstream}: facet is not an upstream array: ${source}`);
   }
 }
-export async function fetchUpstream({ repo = defaultRepo, ref = 'main' } = {}) {
+export async function fetchUpstream({ repo = defaultRepo, ref = 'main', reportDirectory = '.cache' } = {}) {
   if (ref.startsWith('-') || !/^[\w./-]+$/.test(ref)) throw new Error('Invalid upstream ref');
   try { await access(path.join(repo, '.git')); }
   catch {
@@ -56,25 +56,25 @@ export async function fetchUpstream({ repo = defaultRepo, ref = 'main' } = {}) {
   git(repo, ['sparse-checkout', 'set', 'schemas', 'docs', ...Object.values(models).map(m => `open-db/${m.upstream}`)]);
   git(repo, ['fetch', '--depth', '1', 'origin', ref]);
   git(repo, ['checkout', '--detach', 'FETCH_HEAD']);
-  await inspectCategories(repo);
+  await inspectCategories(repo, { reportDirectory });
   const commit = git(repo, ['rev-parse', 'HEAD']);
   console.log(`BuildCores snapshot: ${commit} (${repo})`);
   return commit;
 }
 
-export async function loadSnapshot(repo = defaultRepo) {
+export async function loadSnapshot(repo = defaultRepo, { reportDirectory = '.cache' } = {}) {
   if (git(repo, ['remote', 'get-url', 'origin']) !== UPSTREAM_URL) throw new Error('Expected the BuildCores upstream origin');
   const commit = git(repo, ['rev-parse', 'HEAD']);
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Expected an immutable Git commit');
   if (git(repo, ['status', '--porcelain'])) throw new Error('Upstream checkout is not clean');
-  const coverage = await inspectCategories(repo);
+  const coverage = await inspectCategories(repo, { reportDirectory });
   const tracked = new Set(git(repo, ['ls-tree', '-r', '--name-only', 'HEAD']).split('\n'));
   for (const required of ['README.md', 'LICENSE.txt', 'docs/DATA_MODEL.md']) {
     if (!tracked.has(required)) throw new Error(`Upstream document missing: ${required}`);
     await readFile(path.join(repo, required), 'utf8');
   }
   // Preserve upstream notices unchanged with the fetched snapshot and inspection reports.
-  const noticeDir = path.resolve('.cache/notices', commit);
+  const noticeDir = path.resolve(reportDirectory, 'notices', commit);
   await mkdir(noticeDir, { recursive: true });
   for (const name of ['LICENSE.txt', 'README.md']) await writeFile(path.join(noticeDir, name), await readFile(path.join(repo, name)));
   const ajv = new Ajv({ allErrors: true, strict: false, allowUnionTypes: true, validateFormats: true });
@@ -116,8 +116,8 @@ export async function loadSnapshot(repo = defaultRepo) {
   if (git(repo, ['rev-parse', 'HEAD']) !== commit || git(repo, ['status', '--porcelain'])) {
     report.invalid.push({ file: '<checkout>', error: 'Upstream checkout changed while reading the snapshot' });
   }
-  await mkdir('.cache', { recursive: true });
-  await writeFile('.cache/inspection.json', JSON.stringify(report, null, 2));
-  if (report.invalid.length) throw new Error(`${report.invalid.length} invalid upstream records. No D1 writes performed. See .cache/inspection.json`);
+  await mkdir(reportDirectory, { recursive: true });
+  await writeFile(path.join(reportDirectory, 'inspection.json'), JSON.stringify(report, null, 2));
+  if (report.invalid.length) throw new Error(`${report.invalid.length} invalid upstream records. No D1 writes performed. See ${path.join(reportDirectory, 'inspection.json')}`);
   return { commit, records, report };
 }

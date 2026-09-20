@@ -4,6 +4,12 @@ import { scalarField } from './search-fields.js';
 
 export const FILTER_API_VERSION = 'v1';
 export const MAX_FILTER_OPTIONS = 512;
+export class FilterOptionLimitError extends Error {
+  constructor(category, field, count) {
+    super(`Filter option limit exceeded: ${category}.${field} (${count})`);
+    Object.assign(this, { category, field, option_count: count, limit: MAX_FILTER_OPTIONS });
+  }
+}
 const types = { TEXT: 'string', INTEGER: 'integer', REAL: 'number' };
 const numeric = (column, type) => `CASE WHEN typeof(${column}) IN ('integer','real') AND ${column} BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308${type === 'INTEGER' ? ` AND ${column}=cast(${column} AS INTEGER)` : ''} THEN ${column} END`;
 
@@ -53,7 +59,7 @@ export async function loadFilterMetadata(executeBatch, category) {
           : Number.isFinite(v) && (type !== 'INTEGER' || Number.isInteger(v)))
         .sort((a, b) => type === 'TEXT' ? (a < b ? -1 : a > b ? 1 : 0) : a - b);
       // Never silently truncate and advertise an incomplete selection list.
-      if (values.length > MAX_FILTER_OPTIONS) throw new Error(`Filter option limit exceeded: ${category}.${d.id} (${values.length})`);
+      if (values.length > MAX_FILTER_OPTIONS) throw new FilterOptionLimitError(category, d.id, values.length);
       result.options = values.map(value => ({ value, label: d.optionLabels?.[value] ?? String(value) }));
     }
     return result;

@@ -67,7 +67,6 @@ try {
   console.log('Worker ready. Running search/Detail and 30-category filter HTTP/direct-D1 contracts (deadline 1800s per job).');
   for (const command of [
     ['scripts/verify-api.js', '--url', origin, '--smoke', '--golden', '--paced', '--output', args.output],
-    ['scripts/verify-filters.js', '--url', origin],
   ]) {
     verification = spawn(process.execPath, command, {
       stdio: 'inherit', windowsHide: true, detached: process.platform !== 'win32',

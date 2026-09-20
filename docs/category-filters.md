@@ -137,11 +137,14 @@ npm run benchmark:search
 npm run release:verify -- --local
 ```
 
-`verify:filters:local`はローカルD1の全30カテゴリでquery plan、rows_read budget、rows_written=0、option上限を確認し、`.cache/filter-verification.json`へ記録します。
-`verify:worker:local`は既存search/Detail検証に続き、全30カテゴリの実HTTPとdirect D1 responseを比較し、2回目のHITを確認します。
+`verify:filters:local`は`verifyFilterMetadata(db, {snapshot, output})`を使用し、ローカルD1の全30カテゴリで契約・検証済みsourceとの候補/範囲一致・query plan・rows_read budget・rows_written=0・option上限を確認します。診断先は`.cache/filter-verification.json`です。
+同じ関数をCIの固定実snapshot release gate、およびproduction公開前gateから呼びます。別DBを開かず、呼び出し元のDB/leaseを保持します。公開前の診断先は`.cache/release-filter-metadata.json`です。
+`verify:worker:local` / production `verifyProduction`は共通Filter smokeを使用します。全30カテゴリのHTTP responseを独立source候補と比較し、代表8条件をPOST検索へ渡します（filters/ranges/facets、数値0/1、複数選択、片側range）。CORS/OPTIONS/400/404/405も確認します。
+cache確認は初回HITも許容し、同一POPでの次回HITを要求します。POP移動時は最大3回、判定不能なら`inconclusive`を記録して検証を停止します。ローカルのexpiry/epoch/MISS→HITは決定的なテストで維持します。新しいbypassやTTL変更はありません。
+一般検索/Detailサンプルとidentifierサンプルは分離し、検証済みsourceにも識別子がない場合に限りidentifierだけ`not_applicable`にします。
 単体テストは全公開fieldの検索往復（filters/ranges/facets）、active限定、型、空/不正値、整合性検証、注入拒否、HTTP/CORS、cache epoch/expiry/HIT、障害時動作を検証します。
 
-### 実測結果（ローカルD1、48,134 active製品）
+### 初回実装時の実測結果（ローカルD1、48,134 active製品）
 
 |Category|MISS SQL数|MISS rows_read|HIT SQL数 / rows_read|
 |---|---:|---:|---:|
@@ -159,3 +162,7 @@ npm run release:verify -- --local
 
 検証結果: `npm test` 185件成功（新規8件）、`schema:check`成功、`verify:plans` 45件成功、`verify:worker:local`成功（既存236検索ケース・30カテゴリDetail・resolve・新規30カテゴリfilters）、`benchmark:search`と`release:verify -- --local`成功。
 ローカルD1を共有する検証ジョブの並列実行はMiniflareエラーになったため、D1検証は順次再実行しています。HTTP suiteは既存の3.5秒間隔を維持したまま完了できるよう、検証ジョブの上限を900秒から1,800秒へ延長しました。
+
+差分snapshot B（48,223 active製品）の今回の測定は[差分release検証](incremental-release-validation.md)に分離しています。
+直接検証の36 SQL / 36 adapter operationsと、Workerの36 SQL / 30 binding operations（各カテゴリ1 batch）は別の指標です。
+欠けたメトリクスは`null`で不合格。EXPLAINおよびsync状態確認の診断queryはUI集計のrows_readから分離しています。

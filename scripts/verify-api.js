@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { classifySearchCost } from '../src/search-protection.js';
 import { verifyProduction } from './lib/production-smoke.js';
 import { safeDatabase } from './lib/release-gates.js';
+import { saveValidationReport } from './lib/validation-report.js';
 
 const { values: args } = parseArgs({ options: {
   url: { type: 'string' }, remote: { type: 'boolean', default: false }, rounds: { type: 'string', default: '3' },
@@ -33,7 +34,10 @@ if (args.smoke) {
     const report = await verifyProduction(db, args.url, { golden: args.golden });
     await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
     console.log(JSON.stringify(report));
-  } catch { console.error('API smoke/contract verification failed'); process.exitCode = 1; }
+  } catch (error) {
+    await saveValidationReport(args.output, error.smokeReport ?? { contract: 'failed', phase: 'initialization' }, error);
+    console.error('API smoke/contract verification failed'); process.exitCode = 1;
+  }
   finally { await db.close(); }
   process.exit(process.exitCode ?? 0);
 }

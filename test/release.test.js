@@ -10,7 +10,7 @@ import { syncSnapshot } from '../src/sync.js';
 import { catalogState } from '../src/quality/catalog.js';
 import { cacheEpoch, productionConfig, withReleaseLease, assertGolden, readiness, migrationGate, FTS_GENERATION } from '../scripts/lib/release-gates.js';
 import { assertDeployedVars } from '../scripts/lib/cloudflare-release.js';
-import { pacedRequests } from '../scripts/lib/production-smoke.js';
+import { pacedRequests, categorySmokeSamples } from '../scripts/lib/production-smoke.js';
 import { categoryCountBounds, categoryCountDeltaError } from '../scripts/lib/category-count-guard.js';
 
 const commit = 'a'.repeat(40);
@@ -165,4 +165,12 @@ test('production pacing honors 429 Retry-After and bounds retries without swallo
   const limited = pacedRequests('https://catalog.example', { interval: 0, sleep: async () => {}, fetcher: async () => { calls++; return new Response('', { status: 429 }); } });
   await assert.rejects(limited('/v1/health'));
   assert.equal(calls, 3);
+});
+
+test('smoke samples separate general/Detail from identifiers using validated source, never missing DB rows', () => {
+  const general = normalize('stand', { opendb_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', metadata: { name: 'Monitor Arm' } }, commit);
+  const identified = normalize('stand', { opendb_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', metadata: { name: 'Other Arm', part_numbers: ['ARM-1'] } }, commit);
+  assert.deepEqual(categorySmokeSamples({ records: [general] }, 'stand'), { general, identified: null });
+  assert.deepEqual(categorySmokeSamples({ records: [general, identified] }, 'stand'), { general, identified });
+  assert.throws(() => categorySmokeSamples({ records: [] }, 'stand'), /Missing source API sample/);
 });

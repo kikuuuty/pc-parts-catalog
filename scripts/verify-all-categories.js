@@ -62,17 +62,26 @@ try {
     }
     assert.equal(stats.normalized_rows_verified, records.length);
     // Real upstream samples (synthetic all-identifier-type coverage is in tests).
-    const candidate = records.find(r => r.identifiers.length && r.product.name.length <= 200 && (r.product.name.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= 12);
-    assert(candidate, `No real keyword/identifier sample: ${category}`);
+    const candidate = records.find(r => r.product.name.length <= 200 && (r.product.name.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= 12);
+    assert(candidate, `No real keyword sample: ${category}`);
     const query = async options => { const q = searchQuery(category, options); return rows(q.sql, q.params); };
     const keyword = await query({ keyword: candidate.product.name, limit: 100 });
     assert(keyword.some(r => r.upstream_key === candidate.product.upstream_key), `Keyword sample missing: ${category}`);
-    const identifier = candidate.identifiers[0];
-    const exact = await query({ identifier: { type: identifier.type, value: identifier.value }, limit: 100 });
-    assert(exact.some(r => r.upstream_key === candidate.product.upstream_key), `Identifier sample missing: ${category}`);
-    stats.search_sample = { upstream_key: candidate.product.upstream_key, name: candidate.product.name, identifier: { type: identifier.type, value: identifier.value }, keyword: 'pass', identifier_search: 'pass' };
+    stats.search_sample = { upstream_key: candidate.product.upstream_key, name: candidate.product.name, keyword: 'pass' };
+    const identified = records.find(r => r.identifiers.length);
+    if (identified) {
+      const identifier = identified.identifiers[0];
+      const exact = await query({ identifier: { type: identifier.type, value: identifier.value }, limit: 100 });
+      assert(exact.some(r => r.upstream_key === identified.product.upstream_key), `Source identifier sample missing: ${category}`);
+      stats.search_sample.identifier = { type: identifier.type, value: identifier.value };
+      stats.search_sample.identifier_upstream_key = identified.product.upstream_key;
+      stats.search_sample.identifier_search = 'pass';
+    } else {
+      stats.search_sample.identifier_search = 'not_applicable';
+      stats.search_sample.identifier_reason = 'Validated source has no identifiers in this category';
+    }
     categories[category] = stats;
-    console.log(`${category}: ${stats.normalized_rows_verified} raw/spec rows verified; keyword + identifier pass.`);
+    console.log(`${category}: ${stats.normalized_rows_verified} raw/spec rows verified; keyword pass; identifier ${stats.search_sample.identifier_search}.`);
   }
   const integrity = {
     foreign_key_check: await rows('PRAGMA foreign_key_check'), quick_check: await rows('PRAGMA quick_check'),

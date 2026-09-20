@@ -66,9 +66,12 @@ jobs:
           retention-days: 90
       - name: Production sync and completion verification
         run: npm run release:sync
-      - name: Readiness, integrity, Golden gate, deploy and production verification
+      - name: Readiness, source integrity, Filter metadata, Golden, deploy and HTTP smoke
         # One process holds the D1 writer-exclusion lease across ALL these
-        # phases. Named phase logs/summary identify the precise failed phase.
+        # phases. Shared Filter verification uses this same DB/lease before deploy;
+        # production smoke includes all 30 Filter endpoints. Named states also
+        # distinguish downstream not_run from failed. release-*.json captures
+        # source/filter/UX partial diagnostics even when a gate throws.
         run: node scripts/catalog-release.js deploy
       - name: Release summary artifacts
         if: always()

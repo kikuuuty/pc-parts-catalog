@@ -173,6 +173,11 @@ production promotion commit `b08c5b416cfdd48fc36a13c0a288e39abbe943b9` はdefaul
 repositoryのD1 bindingは昇格済みproduction D1と一致し、scheduled/manual releaseはFTS8 generationを使用できます。
 運用・復旧・credential設定は[release手順](docs/catalog-release.md)。
 
+差分同期の更新履歴、source integrity診断、Filter API公開gate、固定snapshot間の検証・復旧は
+[差分release検証](docs/incremental-release-validation.md)を参照してください。
+`npm run verify:release:cross-snapshot`は専用ローカルDBを作り、固定A→Bの同期から全gate・Worker HTTPまで検証します。
+通常CIの`cross-snapshot`ジョブでも実行し、既存の利用者用ローカルDBは使用しません。
+
 ## ライセンスと出典
 
 BuildCores OpenDBの情報を含み、[ODC Attribution License 1.0](https://opendatacommons.org/licenses/by/1-0/)に基づき利用します。

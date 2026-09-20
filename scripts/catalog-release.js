@@ -12,6 +12,7 @@ import { productionConfig, migrationGate, readiness, searchGate, safeDatabase, w
 import { cloudflareRelease, assertDeployedVars, wrangler } from './lib/cloudflare-release.js';
 import { verifyProduction } from './lib/production-smoke.js';
 import { categoryCountDeltaError } from './lib/category-count-guard.js';
+import { saveValidationReport } from './lib/validation-report.js';
 
 const { positionals: [command], values: args } = parseArgs({ allowPositionals: true, options: {
   local: { type: 'boolean', default: false },
@@ -20,6 +21,8 @@ const { positionals: [command], values: args } = parseArgs({ allowPositionals: t
 assert(['pin', 'sync', 'verify', 'deploy'].includes(command), 'Use pin, sync, verify or deploy');
 assert(!args.local || command === 'verify', '--local is only for read-only gate verification');
 const report = { phase: command, result: 'running', golden: 'not run', deploy: 'not run', post_deploy: 'not run' };
+report.validation = { source_integrity: 'not_run', filter_metadata: 'not_run', search_quality: 'not_run', query_plans: 'not_run' };
+let originalFailure;
 const output = `.cache/release-${command}-report.json`;
 const pinFile = '.cache/release-pin.json';
 const positive = (value, fallback) => {
@@ -89,9 +92,13 @@ async function release(db, config, deploy) {
     if (deploy && process.env.GITHUB_ACTIONS === 'true') expected = JSON.parse(await readFile('.cache/release-snapshot.json', 'utf8'));
     const ready = await readiness(locked, { commit: expected?.commit, expectedCounts: expected?.counts });
     if (expected) assert.equal(ready.sync.id, expected.sync_id, 'Completed sync changed before release');
-    Object.assign(report, { sync_id: ready.sync.id, active: ready.active, completed_at: ready.sync.finished_at, cache_epoch: ready.cache_epoch,fts_integrity:ready.fts.pass });
-    stage('search quality / plans');
-    Object.assign(report, await searchGate(locked,{representative:args.representative}));
+    Object.assign(report, { sync_id: ready.sync.id, snapshot_commit: ready.sync.source_commit, active: ready.active, completed_at: ready.sync.finished_at, cache_epoch: ready.cache_epoch,fts_integrity:ready.fts.pass });
+    Object.assign(report, await searchGate(locked,{representative:args.representative, onPhase(name, state) {
+      report.validation[name] = state;
+      if (state === 'running') stage(name);
+      if (name === 'search_quality' && state === 'failed') report.golden = 'failed';
+      if (name === 'search_quality' && state === 'passed') report.golden = 'passed';
+    }}));
     await renew();
     const confirm = await readiness(locked, { commit: ready.sync.source_commit, expectedCounts: ready.counts });
     assert.equal(confirm.sync.id, ready.sync.id);
@@ -134,7 +141,8 @@ async function release(db, config, deploy) {
       }
       stage('production smoke / contract / Golden');
       report.post_deploy = 'running';
-      report.verification = await verifyProduction(locked, 'https://pc-parts-catalog.kikuuuty.workers.dev', {golden:!args.representative});
+      report.verification = {};
+      await verifyProduction(locked, 'https://pc-parts-catalog.kikuuuty.workers.dev', {golden:!args.representative, report: report.verification});
       if(args.representative) {
         stage('production read-only release verification');
         report.release_validation = await searchGate(locked,{representative:true,output:'.cache/transition-production-gate.json'});
@@ -166,15 +174,18 @@ try {
   }
   report.result = 'success';
 } catch (error) {
+  originalFailure = error;
   report.result = 'failed';
   // Assertion labels are authored here (no SQL or provider response bodies).
   if (error.code === 'ERR_ASSERTION') report.reason = error.message.split('\n')[0].slice(0, 180);
-  if (report.phase === 'search quality / plans') report.golden = 'failed';
   if (report.post_deploy === 'running') report.post_deploy = 'failed';
   console.error(`Release stopped at: ${report.phase}. See docs/catalog-release.md for recovery. Provider errors and SQL are intentionally not logged.`);
   process.exitCode = 1;
 } finally {
-  await writeFile(output, JSON.stringify(report, null, 2) + '\n');
+  await saveValidationReport(output, report, originalFailure);
   console.log(JSON.stringify(report));
-  if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `### Catalog ${command}\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    try { await appendFile(process.env.GITHUB_STEP_SUMMARY, `### Catalog ${command}\n\n\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`); }
+    catch (error) { if (!originalFailure) throw error; }
+  }
 }

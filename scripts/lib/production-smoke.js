@@ -8,12 +8,21 @@ import { catalogState, assertCatalogState } from '../../src/quality/catalog.js';
 import { assertCategories, assertSearchContract, assertPublicHeaders } from './api-contract.js';
 import { models } from '../../src/model.js';
 import { resolveProducts } from '../../src/product-reference.js';
+import { loadSnapshot } from '../../src/upstream.js';
+import { verifyFilterSmoke } from './filter-smoke.js';
 
 export function productionOrigin(value) {
   const url = new URL(value);
   assert(url.protocol === 'https:' || url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname));
   assert(!url.username && !url.password && !url.search && !url.hash && url.pathname === '/');
   return url.origin;
+}
+
+export function categorySmokeSamples(snapshot, category) {
+  const records = snapshot.records.filter(r => r.product.category === category);
+  const general = records.find(r => r.product.name.length <= 200 && (r.product.name.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= 12);
+  assert(general, `Missing source API sample: ${category}`);
+  return { general, identified: records.find(r => r.identifiers.length) ?? null };
 }
 
 export function pacedRequests(origin, { fetcher = fetch, sleep = delay, interval = 3500 } = {}) {
@@ -42,9 +51,15 @@ export function pacedRequests(origin, { fetcher = fetch, sleep = delay, interval
   };
 }
 
-export async function verifyProduction(db, origin, { golden = true, request = pacedRequests(productionOrigin(origin)) } = {}) {
+export async function verifyProduction(db, origin, { golden = true, request = pacedRequests(productionOrigin(origin)), snapshot: suppliedSnapshot, report = {} } = {}) {
+  Object.assign(report, { contract: 'running', phase: 'snapshot', cache: 'not_run', golden_api_matched: 0, extended_categories: [], filters: { status: 'not_run' } });
+  try {
   const initial = await catalogState(db);
   assert.equal(initial?.status, 'complete');
+  const snapshot = suppliedSnapshot ?? await loadSnapshot();
+  Object.assign(report, { snapshot_commit: snapshot.commit, sync: initial });
+  assert.equal(snapshot.commit, initial.source_commit, 'HTTP verification snapshot differs');
+  report.phase = 'search_contract';
   assert.deepEqual((await request('/v1/health')).body, { ok: true, database: 'available' });
   assertCategories((await request('/v1/categories')).body);
   const preflight = await request('/v1/search', { method: 'OPTIONS', headers: { Origin: 'https://consumer.example', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' } }, 204);
@@ -105,32 +120,48 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
     cache = true;
   }
   assert(cache, 'Cache MISS/HIT verification inconclusive after bounded attempts');
-  const extended = [];
+  report.cache = 'MISS -> HIT; POST body equal';
+  report.phase = 'category_search_detail_identifiers';
+  const extended = report.extended_categories;
   for (const category of Object.keys(models)) {
-    const samples = (await db.query(`SELECT p.upstream_key,p.name,i.type,i.value FROM products p JOIN identifiers i ON i.product_id=p.id
-      WHERE p.active=1 AND p.category=? ORDER BY p.id LIMIT 100`, [category])).results;
-    const sample = samples.find(p => p.name.length <= 200 && (p.name.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= 12);
-    assert(sample, `Missing API sample: ${category}`);
+    const { general, identified } = categorySmokeSamples(snapshot, category);
+    const sample = general.product;
+    const item = { category, keyword: 'running', identifier: 'not_run', response: 'not_run', detail: 'not_run' }; extended.push(item);
     const basic = await search({ category, keyword: sample.name });
     assert(basic.body.data.some(p => p.upstream_key === sample.upstream_key), `New category keyword: ${category}`);
-    const exact = await search({ category, identifier: { type: sample.type, value: sample.value }, include: ['identifiers', 'facets'] }, 'POST');
-    const product = exact.body.data.find(p => p.upstream_key === sample.upstream_key);
-    assert(product?.identifiers.some(i => i.type === sample.type && i.value === sample.value), `New category identifier response: ${category}`);
-    assert(product.facets && Object.values(product.facets).every(Array.isArray));
+    item.keyword = 'passed'; item.response = 'passed';
+    const product = basic.body.data.find(p => p.upstream_key === sample.upstream_key);
+    item.detail = 'running';
     const detail=await request(`/v1/products/${product.id}`);
     assert.deepEqual(detail.body,await loadProductDetail(async(sql,params)=>(await db.query(sql,params)).results,product.id));
     assert.equal(detail.response.headers.get('cache-control'),'no-store');
-    extended.push({ category, keyword: 'pass', identifier: 'pass', response: 'pass',detail:'pass' });
+    item.detail = 'passed';
+    if (!identified) {
+      item.identifier = 'not_applicable'; item.identifier_reason = 'Validated source has no identifiers in this category';
+    } else {
+      item.identifier = 'running';
+      const { type, value } = identified.identifiers[0];
+      const exact = await search({ category, identifier: { type, value }, include: ['identifiers', 'facets'] }, 'POST');
+      const match = exact.body.data.find(p => p.upstream_key === identified.product.upstream_key);
+      assert(match?.identifiers.some(i => i.type === type && i.value === value), `Source identifier missing from DB/API: ${category}`);
+      assert(match.facets && Object.values(match.facets).every(Array.isArray));
+      item.identifier = 'passed';
+    }
   }
+  report.phase = 'filter_metadata_http';
+  await verifyFilterSmoke(request, snapshot, { local: new URL(origin).protocol === 'http:', report: report.filters });
+  report.phase = 'golden_http';
   let matched = 0;
   if (golden) {
     const { fixture } = await loadUXFixture();
     for (const item of fixture) {
       await search({ ...item.search, category: item.category, ...(item.query?{keyword:item.query}:{}) }, item.search ? 'POST' : 'GET');
       matched++;
+      report.golden_api_matched = matched;
     }
     assert.equal(matched, fixture.length);
   }
+  report.phase = 'pagination_resolve';
   const listing=await search({category:'memory',limit:3},'POST');
   assert(listing.body.meta.next_cursor);
   await search({category:'memory',limit:5,cursor:listing.body.meta.next_cursor},'POST',listing.lastSortValues);
@@ -140,5 +171,12 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
   assert.deepEqual(resolved.body,await resolveProducts(async(sql,params)=>(await db.query(sql,params)).results,refs));
   assert.equal(resolved.response.headers.get('x-cache'),'BYPASS');
   await assertCatalogState(db, initial);
-  return { contract: 'pass', cache: 'MISS -> HIT; POST body equal', golden_api_matched: matched, extended_categories: extended };
+  report.contract = 'pass'; report.phase = 'complete';
+  return report;
+  } catch (error) {
+    report.contract = 'failed';
+    for (const item of report.extended_categories) for (const key of ['keyword', 'identifier', 'response', 'detail']) if (item[key] === 'running') item[key] = 'failed';
+    error.smokeReport = report;
+    throw error;
+  }
 }

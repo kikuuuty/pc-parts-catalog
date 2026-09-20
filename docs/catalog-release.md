@@ -25,9 +25,11 @@ default branch.
 npm ci → check → immutable upstream pin → full source validation
   → migration history / count envelope → atomic incremental sync
   → complete sync required → D1 release lease
-  → catalog integrity → category FTS integrity → intent quality / plans / cost
+  → catalog integrity → category FTS integrity → source integrity diagnostics
+  → all-category Filter metadata / source oracle / plans / read cost
+  → intent quality / plans / cost
   → epoch → Wrangler dry-run → version/tag reconciliation → deploy
-  → production smoke / cache / HTTP-to-direct compiler equivalence
+  → production smoke / Filter HTTP + source predicates / cache / HTTP-to-direct compiler equivalence
   → state/version recheck → lease release → report artifact
 ```
 
@@ -139,3 +141,31 @@ Sync updates the catalog in place. A retained old Worker is not a retained old
 snapshot; there is no claim of atomic whole-catalog publication. Keep manual SQL,
 migrations and enrichment writes outside the release window. Product-level
 ingestion and category moves remain atomic.
+
+## Incremental snapshot provenance and diagnostics
+
+`products.source_commit` is the upstream commit at the **last update of that row**.
+Unchanged products deliberately retain it. `sync_runs.source_commit` identifies
+the snapshot completed for the **whole catalog**. Source integrity excludes only
+the row's `source_commit` from canonical product comparison; all other normalized
+product fields, raw, typed specs, upstream identifier sets and facet sets remain
+strictly checked, independent of matching content hashes. Missing/unexpected
+active products fail. The release's snapshot-vs-completed-sync equality remains
+mandatory. No blanket provenance rewrite is performed.
+
+`searchGate` saves `.cache/release-source-integrity.json` before rejecting source
+mismatches, then `.cache/release-filter-metadata.json` before publication can
+proceed, followed by `.cache/release-ux-report.json`. The latter's `phases` and
+the CLI report's `validation` distinguish `not_run`, `running`, `passed`, `failed`
+for `source_integrity`, `filter_metadata`, `search_quality`, `query_plans`.
+Source failure leaves search quality `not_run`; legacy `golden`, `deploy` and
+`post_deploy` fields are retained for existing report consumers. Partial reports
+are saved on exceptions without replacing the original error on save failure.
+
+Normal CI invokes the same gate once on fixed snapshot A (including actual Filter
+metadata); its dependent isolated A→B job checks the incremental path and HTTP.
+Production invokes it on the caller's DB under the existing release lease before
+deploy, then `verifyProduction` checks all 30 Filter endpoints and representative
+metadata-derived POST searches, in addition to existing search/Detail/resolve.
+Both CI and release always upload `release-*.json`, including failed diagnostics.
+See [report formats, measured A→B results and recovery](incremental-release-validation.md).

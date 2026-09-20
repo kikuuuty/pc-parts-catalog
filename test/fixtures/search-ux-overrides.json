@@ -25,6 +25,7 @@
   "p2-fan-bequiet140":{"intent":"browse_filter","query":"be quiet","search":{"filters":{"manufacturer":"be quiet!","size_mm":140}}},
   "memory-trident-series":{"intent":"browse"},
   "ext-keyboard-09":{"intent":"browse"},
+  "ext-keyboard-12":{"relevant":{"set":{"nameTokens":["AULA"]}}},
   "ext-monitor-09":{"intent":"browse"},
   "ext-sound_card-05":{"intent":"browse"},
   "ext-thermal_compound-05":{"intent":"browse"},

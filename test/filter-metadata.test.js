@@ -10,6 +10,10 @@ import { createWorker } from '../src/worker.js';
 import { filterRegistry, validateFilterRegistry } from '../src/filter-schema.js';
 import { filterMetadataQueries, loadFilterMetadata, MAX_FILTER_OPTIONS } from '../src/filter-metadata.js';
 import { hasCatalogFullScan, searchQuery } from '../src/queries.js';
+import { verifyFilterMetadata, assertFilterContract, assertFilterSource } from '../scripts/lib/filter-verification.js';
+import { verifyFilterCache, verifyFilterSmoke } from '../scripts/lib/filter-smoke.js';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import path from 'node:path';
 
 async function setup(t) {
   const db = database(); t.after(() => db.sqlite.close());
@@ -37,7 +41,8 @@ async function setup(t) {
   const request = (path, init) => worker.fetch(new Request(`https://catalog.example${path}`, init), env);
   const metadata = category => request(`/v1/categories/${category}/filters`);
   const search = input => request('/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-  return { db, env, cache, request, metadata, search, entries, events, operations, advance: n => clock += n };
+  return { db, env, cache, request, metadata, search, entries, events, operations, advance: n => clock += n,
+    snapshot: { commit: 'a'.repeat(40), records: records.filter((_, i) => i % 3 !== 2) } };
 }
 
 test('all 30 filter endpoints expose usable typed selections/ranges/facets and active-only values', async t => {
@@ -190,4 +195,91 @@ test('metadata plans bound every scalar/facet query by category and indexed PK p
     assert(plan.some(d => /SEARCH p USING .*products_category_manufacturer_series \(category=\?\)/.test(d)), plan.join('\n'));
     if (q.sql.includes('product_facets')) assert(plan.some(d => /SEARCH f USING .*\(product_id=\?\)/.test(d)), plan.join('\n'));
   }
+});
+
+test('all advertised fields support multi-selection and one-sided ranges with independent exact fixture sets', async t => {
+  const h = await setup(t);
+  for (const [index, category] of categories.entries()) {
+    const body = await (await h.metadata(category)).json();
+    for (const f of body.filters) {
+      const inputs = f.control === 'range' ? [{ min: 8 }, { max: 16 }] : [f.options.map(o => o.value)];
+      for (const value of inputs) {
+        const response = await h.search({ category, [f.target]: { [f.id]: value } });
+        assert.equal(response.status, 200);
+        const ids = (await response.json()).data.map(p => p.id).sort((a, b) => a - b);
+        assert.deepEqual(ids, [index * 3 + 1, index * 3 + 2], `${category}.${f.id}`);
+      }
+    }
+  }
+});
+
+test('shared release Filter gate is source-grounded, bounded, read-only and retains caller lease', async t => {
+  const h = await setup(t);
+  h.db.sqlite.exec("INSERT INTO sync_lock VALUES (1,'release-owner',unixepoch()+60)");
+  const report = await verifyFilterMetadata({ ...h.db, releaseOwner: 'release-owner' }, { snapshot: h.snapshot, measurement: 'node:sqlite fixture adapter (not D1 cost)' });
+  assert(report.pass); assert.equal(report.categories.length, 30); assert.equal(report.rows_written, 0);
+  assert.equal(report.sql_statements, 36); assert.equal(report.adapter_operations, 36);
+  assert.equal(report.worker_binding_operations, null);
+  assert.equal((await h.db.query('SELECT owner FROM sync_lock')).results[0].owner, 'release-owner');
+  const body = await loadFilterMetadata(qs => Promise.all(qs.map(async q => (await h.db.query(q.sql, q.params)).results)), 'cpu');
+  assertFilterContract(body, 'cpu'); assertFilterSource(body, h.snapshot.records.filter(r => r.product.category === 'cpu'));
+  const corrupted = structuredClone(body); corrupted.filters.find(f => f.id === 'socket').options.pop();
+  assert.throws(() => assertFilterSource(corrupted, h.snapshot.records.filter(r => r.product.category === 'cpu')), /Source options differ/);
+  const boolean = structuredClone(body); boolean.filters.find(f => f.id === 'includes_cooler').options[0].value = '0';
+  assert.throws(() => assertFilterContract(boolean, 'cpu'), /JSON type/);
+});
+
+test('empty metadata values and non-step-aligned/singleton range endpoints are valid', async t => {
+  assert.doesNotThrow(() => assertFilterContract({ category: 'accessory', filters: [] }, 'accessory', []));
+  const h = await setup(t);
+  const body = await (await h.metadata('mouse')).json();
+  body.filters.find(f => f.id === 'weight_g').range = { min: 8.03, max: 8.03, step: 0.1 };
+  body.filters.find(f => f.id === 'max_dpi').range = null;
+  body.filters.find(f => f.id === 'connectivity').options = [];
+  assert.doesNotThrow(() => assertFilterContract(body, 'mouse'));
+  const reversed = structuredClone(body); reversed.filters[0].options.reverse();
+  assert.throws(() => assertFilterContract(reversed, 'mouse'), /deterministic/);
+});
+
+test('Filter gate saves option overflow details and rejects missing costs without treating them as zero', async t => {
+  const h = await setup(t);
+  await mkdir('.cache', { recursive: true }); const dir = await mkdtemp('.cache/filter-gate-test-');
+  t.after(() => rm(dir, { recursive: true, force: true })); const output = path.join(dir, 'filter.json');
+  const missing = { ...h.db, async query(sql, params) { const r = await h.db.query(sql, params); if (sql.includes('json_group_array')) delete r.meta.rows_read; return r; } };
+  await assert.rejects(verifyFilterMetadata(missing, { snapshot: h.snapshot, output }), /Missing filter cost/);
+  let report = JSON.parse(await readFile(output, 'utf8')); assert.equal(report.rows_read, null); assert.equal(report.pass, false);
+  for (let i = 0; i <= MAX_FILTER_OPTIONS; i++) await h.db.query('INSERT INTO product_facets VALUES (?,?,?)', [categories.indexOf('keyboard') * 3 + 1, 'connectivity', `option-${i}`]);
+  await assert.rejects(verifyFilterMetadata(h.db, { snapshot: h.snapshot, output }), /option limit/);
+  report = JSON.parse(await readFile(output, 'utf8'));
+  const failure = report.categories.find(c => c.category === 'keyboard').failure;
+  assert.deepEqual(failure, { kind: 'option_limit', category: 'keyboard', field: 'connectivity', count: MAX_FILTER_OPTIONS + 3, limit: MAX_FILTER_OPTIONS });
+});
+
+test('production Filter cache accepts warm HIT, distinguishes POP changes, and fails inconclusive or same-POP MISS', async () => {
+  const result = (cache, pop) => ({ body: { category: 'cpu', filters: [] }, response: new Response('{}', { headers: {
+    'Cache-Control': 'public, max-age=0, must-revalidate', 'X-Cache': cache, 'X-Cache-TTL': '600', ...(cache === 'HIT' ? { Age: '1' } : {}), ...(pop ? { 'CF-Ray': `id-${pop}` } : {}),
+  } }) });
+  const warm = {}; await verifyFilterCache(async () => result('HIT', 'NRT'), result('HIT', 'NRT'), { report: warm }); assert.equal(warm.status, 'passed');
+  const moved = {}; const queue = [result('MISS', 'SJC'), result('HIT', 'SJC')];
+  await verifyFilterCache(async () => queue.shift(), result('MISS', 'NRT'), { report: moved }); assert.equal(moved.attempts.length, 2);
+  const failed = {}; await assert.rejects(verifyFilterCache(async () => result('MISS', 'NRT'), result('HIT', 'NRT'), { report: failed }), /Same-POP/); assert.equal(failed.status, 'failed');
+  const unknown = {}; await assert.rejects(verifyFilterCache(async () => result('HIT'), result('HIT'), { report: unknown }), /inconclusive/);
+  assert.equal(unknown.status, 'inconclusive'); assert.equal(unknown.attempts.length, 3);
+  let clock = 0; const nearExpiry = result('HIT', 'NRT'); nearExpiry.response.headers.set('Age', '598');
+  const expiryReport = {}, expiryQueue = [result('MISS', 'NRT'), result('HIT', 'NRT')];
+  await verifyFilterCache(async () => { clock += 4000; return expiryQueue.shift(); }, nearExpiry, { report: expiryReport, now: () => clock });
+  assert.equal(expiryReport.status, 'passed'); assert.equal(expiryReport.attempts[0].reason, 'previous_entry_expired');
+});
+
+test('shared Filter HTTP smoke covers all categories, source-derived POST predicates and boundaries', async t => {
+  const h = await setup(t);
+  const request = async (url, init, expected = 200) => {
+    const response = await h.request(url, init); assert.equal(response.status, expected);
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
+    return { response, body: expected === 204 ? null : await response.json() };
+  };
+  const report = await verifyFilterSmoke(request, h.snapshot, { local: true });
+  assert.equal(report.status, 'passed'); assert.equal(report.categories.length, 30);
+  assert.equal(report.searches.length, 8); assert(report.searches.every(s => s.status === 'passed'));
+  assert.equal(report.boundaries, 'passed'); assert.equal(report.cache.status, 'passed');
 });

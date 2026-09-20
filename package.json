@@ -30,6 +30,7 @@
     "verify:api": "node scripts/verify-api.js",
     "verify:worker:local": "node scripts/verify-worker-local.js",
     "verify:filters:local": "node scripts/verify-filters.js",
+    "verify:release:cross-snapshot": "node scripts/verify-cross-snapshot.js",
     "verify:protection": "node --test test/search-protection.test.js",
     "schema:generate": "node scripts/generate-schema.js",
     "schema:check": "node scripts/generate-schema.js --check",
