@@ -1,7 +1,7 @@
 import { models,ftsName } from '../model.js';
 import { searchQuery } from '../queries.js';
 import { parseSearchIntent } from '../search-intent.js';
-import { matchesFilters } from './ux.js';
+import { matchesFilters, lookupCutoff } from './ux.js';
 import { resolveExpected } from './benchmark.js';
 
 // Evidence only: source membership is never inferred from returned candidates.
@@ -43,7 +43,7 @@ export async function diagnoseResult(db,source,result) {
         normalization:parseSearchIntent(result.category,result.query),match_expression:expression});
     }
   }
-  return {...result,candidate_generation:actual,required:['lookup','identifier'].includes(result.intent)?`Hit@${result.intent==='identifier'?1:result.floors?.hit_at??(result.class==='exact_model'?1:['fallback','typo'].includes(result.class)?5:3)}`:null,
+  return {...result,candidate_generation:actual,required:['lookup','identifier'].includes(result.intent)?`Hit@${lookupCutoff(result)}${result.intent==='lookup'&&result.class==='family'?' + family top3 purity/completeness':''}`:null,
     expected_products:result.relevant_ids.map(product),top_results:top,
     relevant_returned:result.returned_ids.filter(id=>relevant.has(id)).map(product),
     false_positives:result.returned_ids.filter(id=>!relevant.has(id)).map(product),false_negatives:missing.map(product),missing_traces:traces,trace_limit:10};

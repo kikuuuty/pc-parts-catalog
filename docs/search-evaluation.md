@@ -6,7 +6,7 @@ Historical ranks and Top20 precision are not browse release floors.
 
 ## Independent source and optional diagnostics
 
-The pinned BuildCores snapshot is
+The historical fixture-authoring BuildCores snapshot is
 `eec0df175504ebd15f0f3e3a8249a18a22f00940` (48,134 products).
 Normalized source records, not search results, supply relevant sets. Missing DB
 products remain in the denominator. Source verification checks raw data, product
@@ -27,9 +27,13 @@ or reduced floor is introduced. A regression test covers enrichment entering the
 set and still detects a missing FTS document. Details/evidence are in
 [incremental release validation](incremental-release-validation.md).
 
-The 120 legacy + 102 extended + 11 frontend cases retain the five intents:
+The 120 legacy + 102 extended + 14 frontend cases retain the five intents:
 lookup, identifier, browse, browse_filter, filter_only. The frozen source files
-are retained; `search-ux-overrides.json` describes the ten UX reclassifications.
+are retained; `search-ux-overrides.json` supplies UX reclassifications and
+declarative current-source rules. Family lookup is an explicit lookup subtype
+(`intent: "lookup", class: "family"`), using the existing lookup performance
+budget and reporting Hit@1/3/5 and MRR. A broad `class: "family"` query without
+that explicit intent remains browse.
 
 **Human review is optional and never a release gate.** There is no reviewer,
 rationale, checklist or completion quota. All 111 lookup fixtures are machine
@@ -54,9 +58,10 @@ not silently converted to another barcode type.
 
 |Intent|Release requirement|
 |---|---|
-|lookup|Automatically evaluate every case: exact_model Hit@1, normal Hit@3, explicit fallback/typo Hit@5; optional `floors.hit_at` override. Unexpected zero fails. Report Hit@1/3/5 and MRR.|
+|exact / normal lookup|Specific product or source-grounded equivalent set: exact_model Hit@1, normal Hit@3, explicit fallback/typo Hit@5. `floors.hit_at` applies to normal/fallback lookup, never relaxes exact_model or identifier. Unexpected zero fails.|
+|family lookup (`lookup` + `class: family`)|Required `equivalents.set` from source; keep Hit@3 and additionally require every top-three product to belong to the family, with three returned slots (or the complete family if fewer than three source members). Missing source family fails. No old-SKU rank floor or Hit@5 substitution.|
 |identifier|Source-grounded equivalent mapping; Hit@1=100%, no review.|
-|browse|Full candidate-window coverage ≥90%, precision ≥90%, no unexpected zero. Optional `floors.candidate_coverage` / `candidate_precision`. Report contamination and exhaustion.|
+|browse|Full candidate-window coverage ≥90%, precision ≥80%, no unexpected zero. Optional `floors.candidate_coverage` / `candidate_precision`. Report contamination and exhaustion.|
 |browse_filter|Independent relevant set intersected with source-side filters/ranges/facets: recall=precision=1, FP=FN=invalid_filter_products=0.|
 |filter_only|Every source match, exact set equality, no duplicates, no missing/extra, complete cursor traversal, alternate page size and stable order.|
 |product reference|Batch order/duplicates and current IDs; active/inactive/missing distinct; Detail identity matches source.|
@@ -73,6 +78,112 @@ out of 2677 passes with `window_exhausted=true`; 80 relevant out of 84 returned
 for an 80-product source set also passes. Exhaustion alone never fails browse.
 Browse_filter still requires full equality: refine an overly broad fixture/UI
 flow rather than waive missing results.
+
+## Source-derived release truth and stale-fixture validation
+
+The responsibilities are intentionally separate:
+
+* `loadSearchFixture` loads the frozen historical benchmark/evidence. The legacy
+  benchmark remains a historical ranking diagnostic, not the release oracle.
+* `loadUXFixture` overlays `search-ux-overrides.json`, classifies intent and calls
+  `prepareUXCase`. Browse and browse_filter must have a declarative `relevant.set`
+  (an existing `acceptable.set` or `expected.set` can also supply it). Fixed
+  `anyOf` / `upstream_ids` alone fail validation; they are never converted to a
+  guessed query rule. Typed-spec/facet/range classes cannot bypass this by
+  claiming lookup intent. Exact lookup may still use fixed IDs.
+* `loadSnapshot` validates an immutable clean BuildCores checkout and normalizes
+  its records. Release `searchGate` runs `sourceIntegrityGate` and filter metadata
+  verification before evaluating search. The completed sync commit must match
+  the supplied pinned snapshot; last-row-update provenance is not the pin.
+* `sourceCatalog` uses DB data only to map source references to local IDs. Names,
+  specs, facets and identifiers come from snapshot records. Missing DB products
+  retain `missing:` IDs in the denominator. `selectExpectedSet` / `resolveExpected`
+  apply evaluation-only predicates to these records, before retrieval.
+* `evaluateUX` independently intersects semantic relevance with the actual
+  `search.filters`, `search.ranges` and `search.facets`. Filter-only derives the
+  **entire** matching source set without a lexical/ID selector. It rejects a
+  query, identifier or relevance overlay that would contradict filter-only.
+  Direct evaluator callers receive the same fixture validation as the loader.
+* Reports retain historical `expected`, the effective `relevant`/`equivalents`
+  rule, fixture hash, resolved relevant IDs and returned IDs. Diagnostics use
+  these to show missing/extra source products and family top-three failures;
+  returned IDs never generate expected membership.
+
+The existing selector language is sufficient; no product-specific evaluator
+branches, dynamic query parser or additional intent/budget namespace is needed:
+
+```json
+{
+  "relevant": { "set": { "nameTokens": ["ASUS"] } },
+  "search": { "filters": { "resolution_width": 2560, "resolution_height": 1440 } }
+}
+```
+
+`nameTokens` is token-boundary AND, `nameContains` is substring AND, and
+`nameAnyContains` is substring OR. All supplied predicates combine with AND.
+`fields` selects normalized source fields, e.g. `product.manufacturer`,
+`product.series`, `spec.chipset`; field arrays are OR. `identifier` selects exact
+normalized code/type owners. Source-side typed filter/facet values retain SQL
+equality semantics; ranges are inclusive and missing values do not match.
+
+All formerly snapshot-fixed extended browse/browse_filter groups now have
+authored rules, including keyboard, mouse, monitor, headphones and the smaller
+extended categories. Original `anyOf` lists and authoring evidence stay frozen.
+For the ASUS monitor and HyperX groups the original brand token rule is kept;
+no manufacturer-field requirement is invented where the authoring rule used
+the product name. Thus source enrichment naturally changes membership.
+
+For `gpu-tuf5080` / `gpu-asus-tuf5080`, source equivalence is explicitly
+`product.manufacturer = ASUS`, `spec.chipset = GeForce RTX 5080`, and the name
+token `TUF`. OC/color/other derivative SKUs can qualify; other chipsets, series
+and manufacturers cannot. Exact MPN searches still select only owners of that
+MPN and require Hit@1. Family purity is stricter than merely finding one member
+at rank 3: even one unrelated top-three result fails. Its diagnostic metrics are
+`family_precision_at_3`, `family_top3_count` and `relevant_count`.
+
+The browse precision documentation above corrects the previous 90% text to the
+existing evaluator's 80%; this change does not lower the implemented floor.
+Filtered equality now also explicitly fails on absent recall/precision/FP/FN
+or invalid-filter metrics, instead of allowing incomplete reports to pass.
+
+### Growth regression coverage and observed snapshot
+
+`test/ux-source-growth.test.js` uses random source IDs absent from all frozen
+lists. It syncs A→B with a new monitor, typed/facet/range enrichment, new family
+derivatives and identifier enrichment. It proves the set grows, valid retrieval
+passes, deleted FTS documents remain FN, injected semantic/filter violations
+remain FP, source pin mismatch fails, and missing DB rows stay in the denominator.
+It also exercises growing browse/filter-only sets, exact SKU Hit@1, and
+MPN/EAN/UPC/JAN/GTIN owners/type isolation and Hit@1 despite unrelated results.
+Existing tests retain full filter-only cursor traversal beyond 1000 rows,
+source integrity, release pin/retry/resume, fail-closed artifacts, budgets and UI.
+
+A separate local correctness replay of both the historical authoring snapshot
+(48,134 products) and validated commit
+`992dacfa9f516a5251fb01b70c9894bb23ad69d4` (48,288 products) passed all 236 UX
+cases, source integrity, filter metadata and 45 representative query plans on
+each snapshot:
+
+|Case|Historical → current source set|Observed current correctness|
+|---|---:|---|
+|gpu-tuf5080|1 → 4|Family rank 1; top-three precision 1|
+|gpu-asus-tuf5080|1 → 4|Family rank 1; top-three precision 1|
+|ext-monitor-10|72 → 76|Recall=precision=1, FP=FN=0|
+|ext-headphones-10|13 → 15|Recall=precision=1, FP=FN=0|
+|ext-headphones-11|6 → 8|Recall=precision=1, FP=FN=0|
+|ext-headphones-12|13 → 14|Recall=precision=1, FP=FN=0|
+
+This replay used isolated in-memory SQLite, not production D1. Its artifact is
+`.cache/ux-source-992dacfa9f516a5251fb01b70c9894bb23ad69d4/report.json`;
+the report retains missing-D1-cost failures separately from correctness.
+It is not a production performance or deploy authorization result.
+
+Remaining limits: declarative rules still require semantic authoring. New naming
+conventions, renamed series/chipsets or an upstream schema change may require a
+rule/normalizer review. Validation detects absent dynamic rules, not every
+misclassified SKU/family query. Source/filter predicate bugs remain possible,
+which is why independent source checks and negative retrieval tests are kept.
+Filtered sets exceeding the keyword window still fail rather than waiving recall.
 
 ## Ten old browse failures: frontend operation rationale
 

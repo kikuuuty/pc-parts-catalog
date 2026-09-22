@@ -22,6 +22,31 @@ export function classifyIntent(item) {
   return ['family','broad','spec_only','model_spec','typed_spec','facet','range'].includes(item.class) ? 'browse' : 'lookup';
 }
 
+const familyLookup = item => classifyIntent(item)==='lookup' && item.class==='family';
+export const lookupCutoff = item => item.intent==='identifier' || item.class==='exact_model' ? 1
+  : familyLookup(item) ? 3 : item.floors?.hit_at ?? (['fallback','typo'].includes(item.class) ? 5 : 3);
+
+// Historical expected/acceptable IDs remain evidence, never an implicit release
+// truth for discovery. Require an authored rule instead of guessing from a query
+// or silently ignoring an obsolete whitelist. Also used for direct evaluator calls.
+export function prepareUXCase(item) {
+  const intent=classifyIntent(item);
+  const fail=message=>{throw new Error(`${item.id}: ${message}`);};
+  if(!intents.includes(intent))fail(`Unknown intent: ${intent}`);
+  if(['typed_spec','facet','range'].includes(item.class) && !['browse','browse_filter','filter_only'].includes(intent))fail('Set query class requires a source-derived set intent');
+  let relevant;
+  if(['browse','browse_filter'].includes(intent)) {
+    relevant=item.relevant ?? item.acceptable ?? (item.expected?.set ? item.expected : undefined);
+    if(!relevant?.set || Object.keys(relevant).length!==1)fail('Source-derived relevant.set required; fixed IDs are historical evidence only');
+    if(!item.query)fail('Browse requires a query');
+    if(intent==='browse_filter' && !hasFilters(item.search))fail('browse_filter requires filters/ranges/facets');
+    if(intent==='browse' && hasFilters(item.search))fail('Filtered browse requires browse_filter intent');
+  }
+  if(intent==='filter_only' && (item.query || item.search?.identifier || item.relevant))fail('filter_only derives the full set from filters/ranges/facets only');
+  if(familyLookup(item) && (!item.equivalents?.set || Object.keys(item.equivalents).length!==1))fail('Family lookup requires source-derived equivalents.set');
+  return {...item,intent,relevant};
+}
+
 // These predicates execute on independently normalized source records, never on
 // search results. SQL collation semantics are intentional (exact typed equality).
 export function matchesFilters(product, search = {}) {
@@ -43,12 +68,7 @@ export async function loadUXFixture() {
   const overrides=JSON.parse(await readFile('test/fixtures/search-ux-overrides.json','utf8'));
   const inputs=[...legacy.fixture,...extended.fixture,...added].map(item=>({...item,...overrides[item.id]}));
   const hashes=new Map(inputs.map(item=>[item.id,createHash('sha256').update(JSON.stringify(item)).digest('hex')]));
-  const fixture = inputs.map(item => {
-    const intent = classifyIntent(item);
-    const relevant = ['browse','browse_filter'].includes(intent)
-      ? item.relevant ?? item.acceptable ?? (item.expected?.set ? item.expected : { set: { nameTokens: item.query.match(/[\p{L}\p{N}]+/gu) } }) : undefined;
-    return { ...item, intent, relevant, fixture_sha256:hashes.get(item.id) };
-  });
+  const fixture = inputs.map(item => ({...prepareUXCase(item),fixture_sha256:hashes.get(item.id)}));
   return { fixture, hash:createHash('sha256').update(JSON.stringify(fixture)).digest('hex') };
 }
 
@@ -87,9 +107,8 @@ export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, sou
   if (!fixture.length || fixture.some(r=>typeof r.id!=='string'||!r.id.trim()) || new Set(fixture.map(r=>r.id)).size!==fixture.length) throw new Error('Fixture IDs must be unique and nonempty');
   const results = [];
   const sourceById = new Map(source.products.map(p=>[p.id,p]));
-  for (const item of fixture) {
+  for (const item of fixture.map(prepareUXCase)) {
     const intent = classifyIntent(item), setIntent = !['lookup','identifier'].includes(intent);
-    if (!intents.includes(intent)) throw new Error(`Unknown intent: ${intent}`);
     let targets;
     if (intent==='identifier') {
       const identifier=item.search?.identifier??{value:item.query};
@@ -140,6 +159,13 @@ export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, sou
       top20:ids.slice(0,20),returned_ids:ids,relevant_ids:[...targetIds],floors:item.floors,
       diagnostic_command:`npm run diagnose:search -- --case ${item.id}` };
     if (setIntent) Object.assign(r,setMetrics(ids,targetIds));
+    if (familyLookup(item)) {
+      const top=ids.slice(0,3);
+      r.source_grounded=targetIds.size>0;
+      r.relevant_count=targetIds.size;
+      r.family_top3_count=top.length;
+      r.family_precision_at_3=top.length ? top.filter(id=>targetIds.has(id)).length/top.length : 0;
+    }
     if (['browse_filter','filter_only'].includes(intent)) {
       r.invalid_filter_products = ids.filter(id=>!sourceById.has(id) || !matchesFilters(sourceById.get(id),item.search)).length;
       r.filter_correctness = r.invalid_filter_products===0;
@@ -171,7 +197,7 @@ export async function evaluateUX(db, catalog, fixture, { fixtureHash = null, sou
   await assertCatalogState(db,catalog.metadata.last_sync);
   return { schema_version:4,kind:'ux_search_benchmark',fixture_sha256:fixtureHash,catalog:catalog.metadata,
     display_values:{series_null:source.products.filter(p=>p.series===null).length,series_empty:source.products.filter(p=>p.series==='').length,manufacturer_null:source.products.filter(p=>p.manufacturer===null).length},
-    semantics:{keyword_window:1000,filter_pagination:'cursor/keyset, no window',page_size:50,precision_denominator:'returned slots up to K',recall_denominator:'complete independent source relevant set',performance:'first UI page / complete detail or resolve operation; all-page costs separate',human_review:'optional offline diagnostics; never a release gate'},
+    semantics:{keyword_window:1000,filter_pagination:'cursor/keyset, no window',page_size:50,precision_denominator:'returned slots up to K',recall_denominator:'complete independent source relevant set',family_lookup:'source equivalents, Hit@3 and pure top3 (or complete smaller family)',performance:'first UI page / complete detail or resolve operation; all-page costs separate',human_review:'optional offline diagnostics; never a release gate'},
     summary:summarizeUX(results),by_intent:Object.fromEntries(performanceIntents.map(i=>[i,summarizeUX([...results,...operationResults].filter(r=>r.intent===i))])),results,operation_results:operationResults };
 }
 
@@ -189,19 +215,20 @@ export function qualityFailures(report, { budgets = {} } = {}) {
     if(r.max_page_rows_read>(budget.max_rows_read??500000)||r.max_page_sql_duration_ms>(budget.max_sql_duration_ms??250))fail('pagination safety ceiling');
     if (r.intent.startsWith('product_')) { if(!r.correctness)fail('product reference/detail correctness');continue; }
     if (['lookup','identifier'].includes(r.intent)) {
-      const cutoff = r.intent==='identifier' ? 1 : r.floors?.hit_at ?? (r.class==='exact_model' ? 1 : ['fallback','typo'].includes(r.class) ? 5 : 3);
+      const cutoff = lookupCutoff(r);
       if(r.intent==='identifier'&&!r.source_grounded)fail('source identifier mapping missing');
       if(!Number.isSafeInteger(r.rank)||r.rank<1 || r.rank>cutoff) fail(`Hit@${cutoff} floor`);
+      if(familyLookup(r) && (!r.source_grounded || r.family_precision_at_3!==1 || r.family_top3_count!==Math.min(3,r.relevant_count)))fail('family top3 purity/completeness floor');
     } else if(r.intent==='browse') {
       // A full large window is a UI refinement state, not missing-catalog recall.
       const ceiling=r.window_exhausted&&r.relevant_count>r.window_limit?r.window_limit/r.relevant_count:1;
       if(!Number.isFinite(r.relevant_coverage)||r.relevant_coverage < (r.floors?.candidate_coverage??.9)*ceiling) fail('candidate coverage floor');
-      // Family discovery tolerates at most one off-set candidate in five;
+      // Broad discovery tolerates at most one off-set candidate in five;
       // explicit filtered sets below still require zero FP/FN.
       if(!Number.isFinite(r.precision)||r.precision < (r.floors?.candidate_precision??.8)) fail('candidate precision floor');
       if(r.zero_results && r.relevant_count) fail('unexpected zero result');
     } else {
-      if(!r.filter_correctness || r.false_positive_count || r.false_negative_count) fail('filtered set mismatch');
+      if(!r.filter_correctness || r.invalid_filter_products!==0 || r.false_positive_count!==0 || r.false_negative_count!==0 || r.recall!==1 || r.precision!==1 || !r.exact_set_equality) fail('filtered set mismatch');
       if(r.intent==='filter_only' && (!r.exact_set_equality || !r.pagination_correctness || !r.stable_ordering)) fail('pagination/set correctness');
     }
   }

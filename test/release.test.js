@@ -128,6 +128,7 @@ test('production config rejects mismatched remote overrides, retains TTL and che
 test('UX gate rejects machine quality errors, not human review status or browse rank movement', () => {
   const report = { results: ['lookup','identifier','browse','browse_filter','filter_only'].map(intent => ({ id:intent,intent,rank:1,
     review:'reviewed',source_grounded:true,rows_read:100,sql_duration_ms:1,relevant_count:5,relevant_coverage:1,precision:1,filter_correctness:true,
+    recall:1,false_positive_count:0,false_negative_count:0,invalid_filter_products:0,
     exact_set_equality:true,pagination_correctness:true,stable_ordering:true })) };
   assertGolden(report);
   report.results[2].rank=999; assertGolden(report);
