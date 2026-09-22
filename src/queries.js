@@ -96,12 +96,11 @@ export function searchTerms(value) {
   return { strict: describe(tokens), fallback, identifierKind, name: value.normalize('NFKC').trim().toLowerCase() };
 }
 
-export function searchQuery(category, { keyword, filters = {}, ranges = {}, facets = {}, identifier, limit = 20, orderBy, debug = false, after, cursorPage = false } = {}) {
+// Shared typed predicate semantics for search and dynamic facets. No keyword,
+// identifier, ranking or pagination concerns belong here.
+export function searchPredicate(category, { filters = {}, ranges = {}, facets = {} } = {}) {
   if (typeof category !== 'string' || !Object.hasOwn(models, category)) throw new Error(`Unknown category: ${category}`);
   const model = models[category];
-  const index = ftsName(category);
-  if (orderBy === 'relevance') orderBy = undefined;
-  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be 1–100');
   const fields = { ...commonSearchFields, ...model.fields };
   const column = key => scalarField(model, key).column;
   const where = ['p.active=1', 'p.category=?'];
@@ -140,6 +139,30 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
       : `p.id IN (SELECT product_id FROM product_facets WHERE attribute=? AND value IN (${values.map(() => '?').join(',')}))`);
     params.push(attribute, ...values);
   }
+  return { where, params };
+}
+
+export function typedSearchIndex(category, { filters = {}, ranges = {} } = {}) {
+  const model = models[category];
+  const indexes = { ...model.indexes, ...(category === 'motherboard' ? { motherboard_search_chipset: ['chipset', 'product_id'] } : {}) };
+  return Object.entries(indexes).map(([name, columns]) => {
+    let prefix = 0;
+    for (const field of columns) {
+      if (Object.hasOwn(filters, field)) prefix += 2;
+      else { if (Object.hasOwn(ranges, field)) prefix++; break; }
+    }
+    return { name, prefix };
+  }).filter(i => i.prefix > 0).sort((a, b) => b.prefix - a.prefix)[0]?.name;
+}
+
+export function searchQuery(category, { keyword, filters = {}, ranges = {}, facets = {}, identifier, limit = 20, orderBy, debug = false, after, cursorPage = false } = {}) {
+  const { where, params } = searchPredicate(category, { filters, ranges, facets });
+  const model = models[category];
+  const index = ftsName(category);
+  if (orderBy === 'relevance') orderBy = undefined;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('limit must be 1–100');
+  const fields = { ...commonSearchFields, ...model.fields };
+  const column = key => scalarField(model, key).column;
   if (identifier) {
     if (typeof identifier.value !== 'string' || !identifier.value.trim() || (identifier.type && !['mpn','gtin','ean','upc','jan'].includes(identifier.type))) throw new Error('Invalid identifier');
     where.push(`p.id IN (SELECT product_id FROM identifiers WHERE value_key=?${identifier.type ? ' AND type=?' : ''})`);
@@ -151,17 +174,9 @@ export function searchQuery(category, { keyword, filters = {}, ranges = {}, face
   // Retrieve typed candidates before display sorting. Otherwise the listing
   // index can entice SQLite into probing an entire category for sparse filters.
   // 0005 added this path after the frozen initial model index declarations.
-  const typedIndexes={...model.indexes,...(category==='motherboard'?{motherboard_search_chipset:['chipset','product_id']}:{})};
-  const typedIndex=Object.entries(typedIndexes).map(([name,columns])=>{
-    let prefix=0;
-    for(const field of columns) {
-      if(Object.hasOwn(filters,field))prefix+=2;
-      else {if(Object.hasOwn(ranges,field))prefix++;break;}
-    }
-    return {name,prefix};
-  }).filter(i=>i.prefix>0).sort((a,b)=>b.prefix-a.prefix)[0];
+  const typedIndex = typedSearchIndex(category, { filters, ranges });
   if(keyword===undefined && typedIndex) {
-    from = `${model.table} s INDEXED BY ${typedIndex.name} CROSS JOIN products p ON p.id=s.product_id`;
+    from = `${model.table} s INDEXED BY ${typedIndex} CROSS JOIN products p ON p.id=s.product_id`;
   }
   let diagnostics = '';
   let projection = productProjection;

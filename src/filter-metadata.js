@@ -13,6 +13,15 @@ export class FilterOptionLimitError extends Error {
 const types = { TEXT: 'string', INTEGER: 'integer', REAL: 'number' };
 const numeric = (column, type) => `CASE WHEN typeof(${column}) IN ('integer','real') AND ${column} BETWEEN -1.7976931348623157e308 AND 1.7976931348623157e308${type === 'INTEGER' ? ` AND ${column}=cast(${column} AS INTEGER)` : ''} THEN ${column} END`;
 
+export function filterOptionValue(column, type) {
+  return type === 'TEXT' ? `CASE WHEN typeof(${column})='text' AND length(trim(${column}))>0 AND length(${column})<=200 THEN ${column} END` : numeric(column, type);
+}
+
+export function validFilterOption(value, type) {
+  return type === 'TEXT' ? typeof value === 'string' && value.trim().length > 0 && value.length <= 200
+    : Number.isFinite(value) && (type !== 'INTEGER' || Number.isInteger(value));
+}
+
 export function filterMetadataQueries(category) {
   if (!Object.hasOwn(filterRegistry, category)) throw new Error('Unknown category');
   const model = models[category], definitions = filterRegistry[category];
@@ -55,8 +64,7 @@ export async function loadFilterMetadata(executeBatch, category) {
       result.range = Number.isFinite(min) && Number.isFinite(max) && min <= max ? { min, max, step: d.step } : null;
     } else {
       const values = JSON.parse(d.target === 'facets' ? facets.get(d.id) ?? '[]' : scalar[d.id] ?? '[]')
-        .filter(v => type === 'TEXT' ? typeof v === 'string' && v.trim().length > 0 && v.length <= 200
-          : Number.isFinite(v) && (type !== 'INTEGER' || Number.isInteger(v)))
+        .filter(v => validFilterOption(v, type))
         .sort((a, b) => type === 'TEXT' ? (a < b ? -1 : a > b ? 1 : 0) : a - b);
       // Never silently truncate and advertise an incomplete selection list.
       if (values.length > MAX_FILTER_OPTIONS) throw new FilterOptionLimitError(category, d.id, values.length);

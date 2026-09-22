@@ -5,7 +5,8 @@ import { protectSearch, protectHealth, ProtectionError, createRefillGuard } from
 import { loadProductDetail, productDetailCache } from './product-detail.js';
 import { searchWindow, cursorContext, decodeCursor, encodeCursor } from './pagination.js';
 import { validateReferences, resolveProducts } from './product-reference.js';
-import { loadFilterMetadata, filterMetadataCache } from './filter-metadata.js';
+import { loadFilterMetadata, filterMetadataCache, FilterOptionLimitError } from './filter-metadata.js';
+import { dynamicFacetQueries, loadDynamicFacets } from './dynamic-facets.js';
 
 const MAX_BODY = 16 * 1024;
 const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'], '/v1/products/resolve':['POST'] };
@@ -36,17 +37,7 @@ function selections(value, max) {
   return count;
 }
 
-// HTTP limits supplement searchQuery's category/column/type/FTS allowlists.
-async function validate(input, env) {
-  keys(input, fields);
-  if (!categories.includes(input.category)) invalid('category is required and must be a supported category');
-  for (const key of ['keyword', 'orderBy']) if (input[key] !== undefined && !shortText(input[key])) invalid(`${key} must be a nonempty string of at most 200 characters`);
-  const { limit = 20, offset = 0, filters = {}, ranges = {}, facets = {}, include = [] } = input;
-  const maxWindow = searchWindow(input);
-  if (!Array.isArray(include) || include.length > 2 || new Set(include).size !== include.length || include.some(v => !['identifiers', 'facets'].includes(v))) invalid('include accepts identifiers and facets');
-  if (!Number.isInteger(limit) || limit < 1 || limit > 50) invalid('limit must be an integer from 1 to 50');
-  if (!Number.isInteger(offset) || offset < 0 || (maxWindow===null ? offset!==0 : offset+limit>maxWindow)) invalid('Invalid offset; keyword-free searches require cursor pagination');
-  if (input.cursor!==undefined && (input.keyword!==undefined || offset!==0)) invalid('Cursor requires keyword-free search');
+function validateConditions({ filters = {}, ranges = {}, facets = {} }) {
   const values = selections(filters, 8) + selections(facets, 4);
   if (!object(ranges) || Object.keys(ranges).length > 8) invalid('ranges must be an object with at most 8 fields');
   for (const range of Object.values(ranges)) {
@@ -54,6 +45,20 @@ async function validate(input, env) {
     if (!Object.keys(range).length || Object.values(range).some(v => typeof v !== 'number' || !Number.isFinite(v))) invalid('Range bounds must be finite numbers');
   }
   if (values > 40 || Object.keys(filters).length + Object.keys(ranges).length + Object.keys(facets).length > 16) invalid('Search conditions exceed complexity limit');
+}
+
+// HTTP limits supplement searchQuery's category/column/type/FTS allowlists.
+async function validate(input, env) {
+  keys(input, fields);
+  if (!categories.includes(input.category)) invalid('category is required and must be a supported category');
+  for (const key of ['keyword', 'orderBy']) if (input[key] !== undefined && !shortText(input[key])) invalid(`${key} must be a nonempty string of at most 200 characters`);
+  const { limit = 20, offset = 0, include = [] } = input;
+  const maxWindow = searchWindow(input);
+  if (!Array.isArray(include) || include.length > 2 || new Set(include).size !== include.length || include.some(v => !['identifiers', 'facets'].includes(v))) invalid('include accepts identifiers and facets');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) invalid('limit must be an integer from 1 to 50');
+  if (!Number.isInteger(offset) || offset < 0 || (maxWindow===null ? offset!==0 : offset+limit>maxWindow)) invalid('Invalid offset; keyword-free searches require cursor pagination');
+  if (input.cursor!==undefined && (input.keyword!==undefined || offset!==0)) invalid('Cursor requires keyword-free search');
+  validateConditions(input);
   if (input.identifier !== undefined) {
     keys(input.identifier, ['type', 'value']);
     if (!shortText(input.identifier.value) || input.identifier.type !== undefined && !['mpn', 'gtin', 'ean', 'upc', 'jan'].includes(input.identifier.type)) invalid('Invalid identifier');
@@ -182,9 +187,10 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         const url = new URL(request.url);
         const detailMatch = /^\/v1\/products\/([1-9]\d*)$/.exec(url.pathname);
         const filterMatch = /^\/v1\/categories\/([^/]+)\/filters$/.exec(url.pathname);
-        const methods = detailMatch || filterMatch ? ['GET'] : Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
+        const facetMatch = /^\/v1\/categories\/([^/]+)\/facets$/.exec(url.pathname);
+        const methods = facetMatch ? ['POST'] : detailMatch || filterMatch ? ['GET'] : Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
         if (!methods) throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found');
-        event.route = filterMatch ? '/v1/categories/:category/filters' : detailMatch ? '/v1/products/:id' : url.pathname;
+        event.route = facetMatch ? '/v1/categories/:category/facets' : filterMatch ? '/v1/categories/:category/filters' : detailMatch ? '/v1/products/:id' : url.pathname;
         headers.set('Allow', [...methods, 'OPTIONS'].join(', '));
         if (request.method === 'OPTIONS') {
           const method = request.headers.get('access-control-request-method');
@@ -197,7 +203,23 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         } else {
           if (!methods.includes(request.method)) throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Method not allowed');
           if (url.pathname !== '/v1/search' && url.search) invalid('This endpoint accepts no query parameters');
-          if (filterMatch) {
+          if (facetMatch) {
+            const category = facetMatch[1];
+            if (!categories.includes(category)) throw new HttpError(404, 'CATEGORY_NOT_FOUND', 'Category not found');
+            const input = await jsonInput(request);
+            keys(input, ['filters', 'ranges', 'facets']);
+            validateConditions(input);
+            try { dynamicFacetQueries(category, input); }
+            catch { invalid('Invalid facet conditions; check filter fields, types and ranges'); }
+            event.category = category;
+            const release = await protectSearch(env, event, { category, ...input }, 'POST', null, refillGuard);
+            try {
+              payload = await loadDynamicFacets(executeBatch, category, input);
+            } catch (error) {
+              if (error instanceof FilterOptionLimitError) throw new HttpError(500, 'FILTER_OPTION_LIMIT', `Facet ${error.field} exceeds ${error.limit} options`);
+              throw error;
+            } finally { release(); }
+          } else if (filterMatch) {
             const category = filterMatch[1];
             if (!categories.includes(category)) throw new HttpError(404, 'CATEGORY_NOT_FOUND', 'Category not found');
             event.category = category;

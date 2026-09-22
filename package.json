@@ -18,6 +18,7 @@
     "benchmark:search": "node src/cli.js benchmark-search",
     "verify:search:local": "node scripts/verify-search-local.js",
     "benchmark:ux": "node scripts/benchmark-ux.js",
+    "benchmark:facets": "node scripts/benchmark-facets.js",
     "verify:ux:local": "node scripts/verify-ux-api-local.js",
     "diagnose:search": "node scripts/search-diagnostics.js",
     "analyze:search": "node scripts/analyze-search-failures.js",

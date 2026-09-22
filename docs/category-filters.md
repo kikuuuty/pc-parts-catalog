@@ -6,7 +6,7 @@ GET /v1/categories/:category/filters
 
 登録済み30カテゴリで利用可能です。`pc-build-sheet`はカテゴリ選択後にこのresponseを取得し、backendの定義から検索UIを構築できます。
 このAPIは**そのカテゴリのactive catalog全体**の候補を返します。keywordや選択中のfilterを受け取らず、検索条件に応じたdynamic faceted navigationやoptionごとの件数は返しません。
-将来の`POST /v1/search/facets`等が担当する「現在の検索条件で候補・件数を再計算する責務」とは独立しています。
+現在条件での候補・件数は[Dynamic Facet API](dynamic-facets.md) (`POST /v1/categories/:category/facets`)で取得できます。UI定義・初期候補・rangeの観測範囲は引き続きこの静的APIを使用してください。
 
 ## Response contract
 

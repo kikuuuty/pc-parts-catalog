@@ -57,6 +57,7 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 |`GET /v1/health`|D1接続確認|
 |`GET /v1/categories`|registry由来の30カテゴリ|
 |`GET /v1/categories/:category/filters`|UI向けfilter定義・active catalogの選択肢・数値範囲|
+|`POST /v1/categories/:category/facets`|現在条件と両立するmulti_select候補・件数（self-excluding）|
 |`GET /v1/search?category=cpu&q=9800X3D`|簡易検索|
 |`POST /v1/search`|keyword、typed filters、ranges、facets、identifier、orderBy|
 |`GET /v1/products/:id`|選択した製品の詳細とcanonical identifiers|
@@ -87,8 +88,9 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 
 カテゴリ別filter UIは`GET /v1/categories/:category/filters`の`control`・`target`・`value_type`・`options` / `range`から構築できます。
 メーカーを含むcurated定義をbackendで管理し、選択値を`POST /v1/search`の`filters` / `ranges` / `facets`へ送ります。
-候補はactive catalog全体が基準で、現在の検索条件によるdynamic facet countsではありません。
+初期候補はactive catalog全体が基準です。条件変更時には`POST /v1/categories/:category/facets`へ同じ`filters` / `ranges` / `facets`を送り、multi_selectの候補を`{value, label, count}`で更新できます。各field自身の条件だけを除外するself-exclusion方式です。rangeのmin/maxは引き続きstatic metadataを使用します。
 空の候補・range、cache、カテゴリ別項目、送信例は[Filter metadata API](docs/category-filters.md)を参照してください。
+Dynamicの契約・SQL設計・D1実測値は[Dynamic Facet API](docs/dynamic-facets.md)を参照してください。
 
 **numeric id = current DB/runtime ID、source + upstream_key = durable shared reference**。
 search/detailの両responseにidentity fieldsを含みます。共有URL・保存構成・favorites・localStorage・export/importはpairを保存し、復元時にbatch resolveします。
@@ -132,6 +134,7 @@ Browseは特定expectedの細かな順位で判定しません。relevant setは
 npm run benchmark:search -- --output .cache/search-ux.json
 npm run benchmark:search -- --category motherboard --verbose
 npm run benchmark:ux
+npm run benchmark:facets
 npm run verify:ux:local
 npm run release:verify -- --local
 ```
