@@ -6,13 +6,16 @@ import { protectionWorker } from '../test-support/protection-worker.js';
 
 const broad = { category: 'memory', keyword: 'ddr5' };
 const calls = h => Object.fromEntries(protectionBindings.map(b => [b.name, h.env[b.name].calls.length]));
+const facet = h => h.fetch('/v1/categories/cpu/facets', {
+  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+});
 
 test('cache MISS admission fills; HIT never invokes bindings, even missing bindings', async () => {
   const h = protectionWorker();
   const miss = await h.request();
   assert.equal(miss.status, 200);
   assert.equal(miss.headers.get('x-cache'), 'MISS');
-  assert.deepEqual(calls(h), { QUERY_REFILL_LIMITER: 1, D1_MISS_LIMITER: 1, EXPENSIVE_MISS_LIMITER: 0, HEALTH_LIMITER: 0 });
+  assert.deepEqual(calls(h), { QUERY_REFILL_LIMITER: 1, D1_MISS_LIMITER: 1, EXPENSIVE_MISS_LIMITER: 0, HEALTH_LIMITER: 0, FACET_MISS_LIMITER: 0 });
   assert.equal(h.statements.length, 1);
   assert.equal(h.writes, 1);
   for (const b of protectionBindings) delete h.env[b.name];
@@ -44,7 +47,7 @@ test('each denied tier returns safe no-store 429 before D1 or cache write', asyn
   }
 });
 
-test('POST and legal uncached pagination always use both shared tiers', async () => {
+test('POST and legal uncached pagination always use expensive and D1 tiers, never facet', async () => {
   for (const [input, method] of [[{ category: 'cpu', keyword: '14900k' }, 'POST'],
     ...[{ limit: 1 }, { limit: 50 }, { offset: 1 }, { offset: 120 }, { limit: 50, offset: 950 }].map(p => [{ ...broad, ...p }, 'GET'])]) {
     const h = protectionWorker({ limits: { EXPENSIVE_MISS_LIMITER: 1 } });
@@ -55,7 +58,117 @@ test('POST and legal uncached pagination always use both shared tiers', async ()
     assert.equal(h.env.QUERY_REFILL_LIMITER.calls.length, 0);
     assert.equal(h.env.EXPENSIVE_MISS_LIMITER.calls.length, 2);
     assert.equal(h.env.D1_MISS_LIMITER.calls.length, 1);
+    assert.equal(h.env.FACET_MISS_LIMITER.calls.length, 0);
     assert.equal(h.logs.at(-1).search_cost_class, 'uncached');
+  }
+});
+
+test('expensive GET MISS uses expensive and D1 tiers; its HIT uses no tokens', async () => {
+  const h = protectionWorker({ limits: { FACET_MISS_LIMITER: 0 } });
+  assert.equal((await h.request(broad)).status, 200);
+  assert.deepEqual(calls(h), { QUERY_REFILL_LIMITER: 1, D1_MISS_LIMITER: 1, EXPENSIVE_MISS_LIMITER: 1, HEALTH_LIMITER: 0, FACET_MISS_LIMITER: 0 });
+  assert.equal(h.logs.at(-1).rate_limit_class, 'expensive_miss');
+  const previous = calls(h);
+  assert.equal((await h.request(broad)).headers.get('x-cache'), 'HIT');
+  assert.deepEqual(calls(h), previous);
+});
+
+test('facet admits 30 requests, rejects the 31st before D1/global tokens, and recovers', async () => {
+  const h = protectionWorker({ limits: { EXPENSIVE_MISS_LIMITER: 0, QUERY_REFILL_LIMITER: 0 } });
+  for (let i = 0; i < 30; i++) {
+    const response = await facet(h);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-cache'), 'BYPASS');
+    assert.equal(h.logs.at(-1).rate_limit_status, 'allowed');
+    assert.equal(h.logs.at(-1).rate_limit_class, 'facet_miss');
+  }
+  assert.deepEqual(calls(h), { QUERY_REFILL_LIMITER: 0, D1_MISS_LIMITER: 30, EXPENSIVE_MISS_LIMITER: 0, HEALTH_LIMITER: 0, FACET_MISS_LIMITER: 30 });
+  const response = await facet(h);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('retry-after'), '60');
+  assert.equal(h.logs.at(-1).rate_limit_class, 'facet_miss');
+  assert.equal(h.logs.at(-1).d1_queries, 0);
+  assert.equal(h.statements.length, 30);
+  assert.equal(h.env.D1_MISS_LIMITER.calls.length, 30);
+  assert.equal(h.env.FACET_MISS_LIMITER.calls.length, 31);
+  assert.equal(h.writes, 0);
+  h.advance(60_000);
+  assert.equal((await facet(h)).status, 200);
+});
+
+test('facet and global denials preserve the public 429 contract and stop before D1', async () => {
+  for (const [name, tier] of [['FACET_MISS_LIMITER', 'facet_miss'], ['D1_MISS_LIMITER', 'd1_miss']]) {
+    const h = protectionWorker({ limits: { [name]: 0 } });
+    const response = await facet(h);
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-cache'), 'BYPASS');
+    assert.equal(response.headers.get('retry-after'), '60');
+    assert.equal(response.headers.get('access-control-allow-origin'), '*');
+    assert.match(response.headers.get('access-control-expose-headers'), /Retry-After/);
+    assert.deepEqual(await response.json(), { error: { code: 'RATE_LIMITED', message: 'Too many search requests' }, request_id: response.headers.get('x-request-id') });
+    assert.equal(h.logs.at(-1).rate_limit_status, 'denied');
+    assert.equal(h.logs.at(-1).rate_limit_class, tier);
+    assert.equal(h.logs.at(-1).d1_queries, 0);
+    assert.equal(h.logs.at(-1).rows_read, 0);
+    assert.equal(h.statements.length, 0);
+    assert.equal(h.writes, 0);
+    assert.equal(h.env.FACET_MISS_LIMITER.calls.length, 1);
+    assert.equal(h.env.D1_MISS_LIMITER.calls.length, name === 'FACET_MISS_LIMITER' ? 0 : 1);
+    assert.equal(h.env.EXPENSIVE_MISS_LIMITER.calls.length, 0);
+    assert.equal(h.env.QUERY_REFILL_LIMITER.calls.length, 0);
+  }
+});
+
+test('20 advanced Searches plus 20 facets have independent budgets and share the global D1 ceiling', async () => {
+  const h = protectionWorker();
+  const search = () => h.request({ category: 'cpu', filters: { manufacturer: ['Intel'] } }, 'POST');
+  for (let i = 0; i < 20; i++) {
+    assert.equal((await facet(h)).status, 200);
+    assert.equal((await search()).status, 200);
+  }
+  assert.deepEqual(calls(h), { QUERY_REFILL_LIMITER: 0, D1_MISS_LIMITER: 40, EXPENSIVE_MISS_LIMITER: 20, HEALTH_LIMITER: 0, FACET_MISS_LIMITER: 20 });
+  assert.equal((await search()).status, 429);
+  assert.equal(h.logs.at(-1).rate_limit_class, 'expensive_miss');
+  assert.equal(h.env.D1_MISS_LIMITER.calls.length, 40);
+  for (let i = 0; i < 11; i++) assert.equal((await h.request({ category: 'cpu', keyword: `model${1000 + i}` })).status, 200);
+  for (let i = 0; i < 9; i++) assert.equal((await facet(h)).status, 200);
+  assert.equal(h.statements.length, 60);
+  // Facet still has its 30th token, but Search + Facet have used all 60 D1 tokens.
+  const response = await facet(h);
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('retry-after'), '60');
+  assert.equal(h.logs.at(-1).rate_limit_class, 'd1_miss');
+  assert.equal(h.logs.at(-1).d1_queries, 0);
+  assert.equal(h.statements.length, 60);
+  assert.equal(h.env.FACET_MISS_LIMITER.calls.length, 30);
+  assert.equal(h.env.D1_MISS_LIMITER.calls.length, 61);
+  assert.equal(new Set(h.env.D1_MISS_LIMITER.calls).size, 1);
+  // Nontransactional: the D1 rejection did not refund the 30th facet token.
+  assert.equal((await facet(h)).status, 429);
+  assert.equal(h.logs.at(-1).rate_limit_class, 'facet_miss');
+  assert.equal(h.env.D1_MISS_LIMITER.calls.length, 61);
+});
+
+test('both facet tiers fail closed on missing, throwing or malformed bindings before D1', async () => {
+  for (const [name, tier] of [['FACET_MISS_LIMITER', 'facet_miss'], ['D1_MISS_LIMITER', 'd1_miss']]) {
+    for (const failure of [undefined, { limit() { throw new Error('secret'); } }, { limit: async () => ({ success: 'yes' }) }]) {
+      const h = protectionWorker();
+      h.env[name] = failure;
+      const response = await facet(h);
+      assert.equal(response.status, 503);
+      assert.equal(response.headers.get('retry-after'), '60');
+      assert.equal(response.headers.get('cache-control'), 'no-store');
+      assert.deepEqual(await response.json(), { error: { code: 'PROTECTION_UNAVAILABLE', message: 'Request protection temporarily unavailable' }, request_id: response.headers.get('x-request-id') });
+      assert.equal(h.logs.at(-1).rate_limit_status, 'unavailable');
+      assert.equal(h.logs.at(-1).rate_limit_class, tier);
+      assert.equal(h.logs.at(-1).d1_queries, 0);
+      assert.equal(h.statements.length, 0);
+      assert.equal(h.writes, 0);
+      assert.equal(h.env.EXPENSIVE_MISS_LIMITER.calls.length, 0);
+      if (name === 'FACET_MISS_LIMITER') assert.equal(h.env.D1_MISS_LIMITER.calls.length, 0);
+    }
   }
 });
 
@@ -136,7 +249,7 @@ test('limiter missing, exception and malformed result fail closed; warmed HIT re
     const h = protectionWorker();
     await h.request();
     h.env[name] = failure;
-    const response = name === 'HEALTH_LIMITER' ? await h.fetch('/v1/health') : await h.request(broad);
+    const response = name === 'HEALTH_LIMITER' ? await h.fetch('/v1/health') : name === 'FACET_MISS_LIMITER' ? await facet(h) : await h.request(broad);
     assert.equal(response.status, 503);
     assert.equal((await response.json()).error.code, 'PROTECTION_UNAVAILABLE');
     assert.equal(h.logs.at(-1).d1_queries, 0);
@@ -179,5 +292,18 @@ test('predeploy validates production and rejects missing/shared/wrong thresholds
     c => c.ratelimits[0].simple.period = 30, c => c.ratelimits[1].simple.limit = 600, c => delete c.vars.CATALOG_CACHE_EPOCH]) {
     const copy = structuredClone(config); mutate(copy); assert.throws(() => validateProtectionConfig(copy));
   }
-  assert.equal(new Set([...config.ratelimits, ...config.env.local.ratelimits].map(b => b.namespace_id)).size, 8);
+  for (const binding of protectionBindings) {
+    for (const mutate of [c => c.ratelimits = c.ratelimits.filter(b => b.name !== binding.name),
+      c => c.ratelimits.find(b => b.name === binding.name).namespace_id = '99999999',
+      c => c.ratelimits.find(b => b.name === binding.name).simple.limit++,
+      c => c.ratelimits.find(b => b.name === binding.name).simple.period = 30,
+      c => c.ratelimits.push(structuredClone(c.ratelimits.find(b => b.name === binding.name)))]) {
+      const copy = structuredClone(config); mutate(copy); assert.throws(() => validateProtectionConfig(copy), binding.name);
+    }
+  }
+  assert.equal(config.ratelimits.length, 5);
+  assert.equal(config.env.local.ratelimits.length, 5);
+  assert.deepEqual(config.env.local.ratelimits.map(({ name, simple }) => ({ name, simple })), protectionBindings.map(({ name, simple }) => ({ name, simple })));
+  assert.equal(config.env.local.ratelimits.find(b => b.name === 'FACET_MISS_LIMITER').namespace_id, '29599105');
+  assert.equal(new Set([...config.ratelimits, ...config.env.local.ratelimits].map(b => b.namespace_id)).size, 10);
 });

@@ -1,5 +1,32 @@
 # Production D1 read protection — 2026-09-13
 
+## Dynamic Facet rate分離（2026-09-23）
+
+現行コードではDynamic Facetのbudgetを通常Searchから分離しています。以下のproduction実測・version情報は2026-09-13の導入時記録であり、この分離のdeploy実績ではありません。
+
+```text
+Facet → FACET_MISS_LIMITER (30/60秒) → D1_MISS_LIMITER (60/60秒) → D1
+Search (expensive / uncached) → EXPENSIVE_MISS_LIMITER (20/60秒) → D1_MISS_LIMITER → D1
+```
+
+`protectFacet()`はvalidation後、Facet専用→共通D1の順で判定し、Searchのexpensive budget・query refillは使用しません。Facet専用拒否はD1 tokenを消費せず、D1実行0で429。後段D1拒否では前段Facet tokenは返却できません。
+`POST /v1/search`とexpensive GET MISSの20/60秒、normal GET MISSのD1保護、cache HITのtoken消費0、query refill guardは維持します。
+共通D1はFacet・Searchの合計request admissionを制限します。1 requestが複数SQLを実行してもtokenは1つです。「global」は全検索系で共有する意味であり、bindingのcolo-local / eventualな性質は変わりません。
+
+**Facetの30/60秒は恒久値ではなくproduction telemetryを見て調整する初期threshold**です。route/colo別の`facet_miss`・`expensive_miss`・`d1_miss`の429率を分け、許可時の`rows_read`、`d1_queries`、SQL/HTTP latency、runtime CPU p95/max、503 `unavailable`を併せて確認します。Facetの拒否率だけを見てD1全体の余裕を判断しないでください。
+threshold変更は`protectionBindings`・Wrangler production/localを同時に更新し、厳密なpredeploy検証を維持します。現在は5 bindings、production/local合計10 namespacesです。namespace照合scriptは`protectionBindings`を列挙するため新Facet bindingも自動的に対象になります。
+
+分離実装の検証（2026-09-23、production deploy前）:
+
+- `npm run check`: schema check・233 tests成功（skip 0）。`verify:protection`は17件、Worker＋Dynamic Facet単独実行は26件成功。
+- deterministic fake limiter: Facet 30件200、31件目429 / `facet_miss` / D1=0 / D1 token追加消費0。20 Search＋20 Facetは全件200。normal検索も合算したD1上限で`d1_miss`、後段拒否時のFacet token返却なしを確認。
+- `worker-predeploy.js`: remote readiness成功。`check-rate-namespaces.js`: 現account 1 Worker、新Facetを含むproduction 5 namespacesの衝突0。production/local全10 namespacesの一意性は自動テストで確認。Wrangler dry-runで5 bindingsを確認。
+- `npm run lint`はscript未定義。tracked JavaScriptの`node --check`と`git diff --check`は成功。
+- 既存`verify-rate-smoke.js`は最初の200応答で`rows_read`の固定期待値49と実測29が不一致となり停止。429 probe完了とは扱わない。
+- `verify:worker:local`の拡張API smokeは検証snapshot `992dacfa…`とlocal D1 `eec0df17…`の不一致でHTTP検証前に停止。別途、local Workerに対する既存`verify-api.js --url http://127.0.0.1:8789 --paced --rounds 2`は11検索×2回＋advanced POSTのHTTP/direct-D1照合に成功（`.cache/api-facet-rate-basic.json`）。拡張smokeの成功を代替するものではない。
+
+deploy前にはrate smokeのread期待値と検証snapshotの整合を確認し、両検証を再実行する。新Facet bindingのproduction動作・telemetryはdeploy後に確認する。
+
 ## 結果と到達範囲
 
 **Workers Rate Limiting bindingをproductionへdeployし、cache HITがD1保護tokenを消費しない経路、unique/uncached burst制限、429のD1実行0を検証した。**
@@ -54,7 +81,7 @@ Workers HTTP request料金はHITでも残る。
 実装: `src/worker.js` / `src/search-protection.js`。既存`src/search-cache.js`を使用。
 
 ```text
-request
+Search request（Dynamic Facetは上記の独立経路）
   ↓ route/method/body/HTTP validation
   ↓ searchQuery validation・SQL生成（DB実行なし）
   ↓ GET Cache API lookup
@@ -83,10 +110,11 @@ categories/OPTIONS/validation失敗はbindingもD1も呼ばない。healthは独
 |---|---:|---:|---:|---|---|
 |`QUERY_REFILL_LIMITER`|`29599001`|10秒|2|canonical Cache API request URLのSHA-256、64 hex文字|cache keyを持つ非HIT検索|
 |`D1_MISS_LIMITER`|`29599002`|60秒|60|`search-d1-miss`|D1へ進む全検索|
-|`EXPENSIVE_MISS_LIMITER`|`29599003`|60秒|20|`search-expensive-miss`|expensive GET MISS、POST、非cache pagination、cache障害/停止|
+|`EXPENSIVE_MISS_LIMITER`|`29599003`|60秒|20|`search-expensive-miss`|expensive GET MISS、Search/resolve POST、非cache pagination、cache障害/停止（Dynamic Facetを除く）|
 |`HEALTH_LIMITER`|`29599004`|60秒|60|`d1-health`|GET `/v1/health` のSELECT 1直前|
+|`FACET_MISS_LIMITER`|`29599005`|60秒|30|`facet-miss`|POST `/v1/categories/:category/facets`|
 
-namespaceはsecretではなくrepository内でstable。local環境は別namespace **29599101〜29599104**、同じthreshold。
+namespaceはsecretではなくrepository内でstable。local環境は別namespace **29599101〜29599105**、同じthreshold。Facet用はproduction `29599005` / local `29599105`。既存IDは維持します。
 `scripts/check-rate-namespaces.js`でaccountの現在のWorker設定をread-only列挙し、**1 Worker、他bindingとの衝突0**を確認した。
 将来の別Worker/過去version/手動設定まで永続予約するregistryではない。新規namespace導入時・他Worker追加時にも照合する。
 
@@ -137,7 +165,7 @@ baseline合計は前後とも144,866 reads。healthのSELECT 1は通常0 rows_re
 
 ### `classifySearchCost(input)` の一般則
 
-- POSTまたはcache非対象/使用不能 → **uncached**（expensiveと同じ20/60 tier）。
+- `protectSearch()`を通るPOSTまたはcache非対象/使用不能 → **uncached**（expensiveと同じ20/60 tier）。Dynamic Facetはこのclassifierを通らず専用30/60 tier。
 - keywordなしcategory listing → **expensive**。
 - 既存`parseSearchIntent()`の`specOnly` / `family` / `identity` → **expensive**。
 - 残余tokensに3〜5桁数字と短い英数字affixによるmodel-like tokenがある → **normal**。
@@ -168,6 +196,7 @@ cheapの目安は100行未満、mediumは100〜4,999行。runtimeのclassはnorm
 |---|---|
 |全MISS 60/60秒|既存mixed 100件には36 MISS。全件を同一window内に置いたoffline replayでも429=0、24件の追加admission余裕。normal query実測は概ね数十〜千行台だが、model-like abuseにも有限budgetを置く|
 |expensive/uncached 20/60秒|同mixedのrestricted MISSは13件。20は約1.54倍の余裕。通常の数回のadvanced POSTやpage送りを許容しつつ、broad/POST/深いpaginationを同じresource予算で囲う。実ユーザーtraffic未観測のため初期値|
+|Facet 30/60秒|フィルター操作のFacet呼出しを通常Searchと別budgetにするための初期threshold。production telemetryを見て調整可能。D1全体の60/60秒は引き続き共通|
 |query refill 2/10秒|1回のrefillが通常100〜数百ms、TTL=300秒。1件だけよりretry/失敗への余裕を取り、10連打のうち少数だけを許可する狙い。eventual consistencyによる初期burstの弱点は後述|
 |health 60/60秒|1分に数回のmonitor＋運用確認に余裕を持たせる。1秒あたり1 probe相当のresource枠。search予算を減らさず安価なconnectivity probeを維持|
 
@@ -193,7 +222,7 @@ Access-Control-Allow-Origin: *
 }
 ```
 
-refill / in-flight拒否は`Retry-After: 10`、global/expensive/healthは`60`。
+refill / in-flight拒否は`Retry-After: 10`、global/expensive/facet/healthは`60`。Facetはrefillを使わず、公開429 messageも既存の`Too many search requests`を維持。
 healthのmessageは`Too many health requests`。正確なreset時刻ではなく**再試行までの保守的な推奨秒数**であり、
 その後の成功を保証しない。clientはRetry-After後にjitter付きで再試行し、連打しない。
 `Retry-After`はCORS exposeする。新しいrate/remaining/debug headerは設けない。
@@ -303,11 +332,12 @@ rows_readが0でもHTTP/Worker/D1 queryの資源は消費するためhealth専�
 |field|値|
 |---|---|
 |`rate_limit_status`|`not_checked` / `allowed` / `denied` / `unavailable`|
-|`rate_limit_class`|`none` / `query_inflight` / `query_refill` / `expensive_miss` / `d1_miss` / `health`|
+|`rate_limit_class`|`none` / `query_inflight` / `query_refill` / `expensive_miss` / `facet_miss` / `d1_miss` / `health`|
 |`search_cost_class`|`not_classified` / `normal` / `expensive` / `uncached`|
 
 `cache_status`, `d1_queries`, `rows_read`, `rows_written`, `sql_duration_ms`, `elapsed_ms`は継続。
 HITは`not_checked`・`not_classified`・D1=0。拒否時の`rate_limit_class`は止めたlayer、allowed時は通過した最終resource tierの概要。
+Facet許可・専用拒否は`facet_miss`、共通D1拒否は`d1_miss`。Facetの`search_cost_class`は引き続き`uncached`。binding障害の`unavailable`も失敗したlayerを記録します。
 429では既存error契約に従い`cache_status=BYPASS`。cache対象だったかの診断にはcost classと拒否layerも使う。
 Worker CPUはJSからelapsedと混同して生成せず、**tail runtimeのcpuTime**をrequest IDで照合する。
 IP、keyword、URL全文、SQL、filters、token、hash keyをstructured logへ追加しない。

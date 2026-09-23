@@ -153,6 +153,7 @@ test('invalid requests fail before D1, including excluded fields, complexity, bo
   assert.equal((await raw(' '.repeat(16385))).status, 413);
   assert.equal((await raw('{}', { 'Content-Type': 'application/json', 'Content-Length': '20000' })).status, 413);
   assert.equal(h.operations.length, 0);
+  assert(Object.values(h.env).filter(b => b?.calls).every(b => b.calls.length === 0));
   assert.equal((await h.post('cpu', { filters: { socket: ["x' OR 1=1--"] } })).status, 200);
 });
 
@@ -163,9 +164,12 @@ test('no-store, telemetry, protection, DB failure and explicit option overflow',
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
   assert.equal(h.events.at(-1).route, '/v1/categories/:category/facets');
   assert.equal(h.events.at(-1).search_cost_class, 'uncached');
-  h.env.EXPENSIVE_MISS_LIMITER.limit = async () => ({ success: false });
+  assert.equal(h.events.at(-1).rate_limit_class, 'facet_miss');
+  assert.equal(h.env.FACET_MISS_LIMITER.calls.length, 1);
+  assert.equal(h.env.EXPENSIVE_MISS_LIMITER.calls.length, 0);
+  h.env.FACET_MISS_LIMITER.limit = async () => ({ success: false });
   assert.equal((await h.post('cpu')).status, 429); assert.equal(h.events.at(-1).d1_queries, 0);
-  h.env.EXPENSIVE_MISS_LIMITER.limit = async () => { throw Error('offline'); };
+  h.env.FACET_MISS_LIMITER.limit = async () => { throw Error('offline'); };
   assert.equal((await h.post('cpu')).status, 503); assert.equal(h.events.at(-1).d1_queries, 0);
   Object.assign(h.env, fakeLimiters({ unlimited: true }));
   const batch = h.env.DB.batch;

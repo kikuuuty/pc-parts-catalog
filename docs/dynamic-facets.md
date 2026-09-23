@@ -109,9 +109,26 @@ option上限を超えた場合は全responseを500 `FILTER_OPTION_LIMIT`にし�
 - unknown body/condition field、不正な型・範囲・複雑度、query parameter: 400 `INVALID_REQUEST`。
 - 大きすぎるbody: 413。JSON以外: 415。GET等: 405 (`Allow: POST, OPTIONS`)。
 - OPTIONSは204、既存public CORS `*`。DB障害は既存の秘匿化された500/503。
-- **キャッシュなし**: `Cache-Control: no-store`, `X-Cache: BYPASS`。既存のuncached POSTと同じexpensive/all-MISS limiterを適用し、429/503と`Retry-After`を維持します。
+- **キャッシュなし**: `Cache-Control: no-store`, `X-Cache: BYPASS`。専用の`protectFacet()`で`FACET_MISS_LIMITER`（30/60秒）→`D1_MISS_LIMITER`（60/60秒）の順に判定します。`EXPENSIVE_MISS_LIMITER`・query refill limiterは消費しません。
 - Worker telemetryはroute、SQL数、batch操作数、rows_read/written、durationを記録します。条件値やSQLは記録しません。
 - 静的GETのepoch cache / TTL / browser再検証ポリシーは継続します。
+
+### Rate budgetの分離
+
+```text
+Facet → FACET_MISS_LIMITER (30/60秒) → D1_MISS_LIMITER (60/60秒) → D1
+Search (expensive / uncached) → EXPENSIVE_MISS_LIMITER (20/60秒) → D1_MISS_LIMITER → D1
+```
+
+`POST /v1/search`は引き続きSearch側の20/60秒budgetを使用します。normal GET MISSはD1側、cache HITはMISS limiterを消費しません。
+両方の専用budgetを分離しても、D1 admissionは同じbinding・keyで合算し、60/60秒の最終防衛線を維持します。これはrequest単位のadmissionで、1 Facet request内のSQL数ではありません。Workers bindingはcolo-local / eventually consistentであり、worldwideで厳密な60件を保証するものではありません。
+
+Facet専用拒否は後段のD1 tokenを消費せず、D1実行0で429を返します。bindingは非transactionalなので、後段のD1 limiterによる拒否では既に消費したFacet tokenを返却できません。
+両limiterの429は`Retry-After: 60`。公開エラーは既存の`RATE_LIMITED` / `Too many search requests`と`request_id`を維持し、binding欠落・例外・不正応答ではfail-closedの503 `PROTECTION_UNAVAILABLE`（同じく60秒）になります。
+
+telemetryの`rate_limit_class`はFacet許可・専用拒否で`facet_miss`、D1拒否で`d1_miss`、Search専用拒否で`expensive_miss`です。`search_cost_class`はFacetでも従来の`uncached`を維持します。
+**30/60秒は調整可能な初期threshold**です。productionでroute/colo別の`facet_miss`・`expensive_miss`・`d1_miss`の429率、`unavailable`（503）、許可requestの`rows_read`・`d1_queries`・SQL/HTTP latency・runtime CPUを観測して調整します。
+namespaceはproduction `29599005`、local `29599105`。変更時は`wrangler.json`の両環境と`protectionBindings`の厳密なpredeploy契約を同時に更新します。
 
 ## SQL設計とindex
 
@@ -136,6 +153,7 @@ option上限を超えた場合は全responseを500 `FILTER_OPTION_LIMIT`にし�
 
 ```sh
 npm run check
+npm run verify:protection
 npm run benchmark:facets
 npm run verify:plans
 ```
@@ -161,6 +179,8 @@ query数の上限、catalog/facet全走査なし、option上限、rows_written=0
 self-exclusionでカテゴリ全体を再集計するfieldがあるため、選択条件が増えるだけで必ずreadsが減るわけではありません。現在の規模では上記のbounded readと既存MISS保護を採用し、長期cacheを追加していません。
 
 自動テストはCPUの5必須ケース、motherboard/GPUを含む全30カテゴリの独立fixture候補・件数、通常検索との件数一致、OR/AND/range/multi-value、active限定、boolean label、入力上限、SQL注入、overflow、protection、cache bypass、query planを確認します。既存テストを含む228件とschema check、既存45検索planが成功しました。
+
+rate分離の追加テストはdeterministic fake limiterで30 Facet許可→31件目429/D1=0、20 advanced Search＋20 Facetの独立消費、normal検索も合算した60件のD1上限、拒否順序・refundなし・429/503契約・設定欠落/相違を確認します。fakeの正確な件数はproduction bindingの厳密なquota保証ではありません。
 
 ## pc-build-sheet接続時
 

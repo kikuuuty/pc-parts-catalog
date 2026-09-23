@@ -17,6 +17,7 @@ export const protectionBindings = [
   { name: 'D1_MISS_LIMITER', namespace_id: '29599002', simple: { limit: 60, period: 60 } },
   { name: 'EXPENSIVE_MISS_LIMITER', namespace_id: '29599003', simple: { limit: 20, period: 60 } },
   { name: 'HEALTH_LIMITER', namespace_id: '29599004', simple: { limit: 60, period: 60 } },
+  { name: 'FACET_MISS_LIMITER', namespace_id: '29599005', simple: { limit: 30, period: 60 } },
 ];
 
 export class ProtectionError extends Error {
@@ -84,6 +85,15 @@ export async function protectSearch(env, event, input, method, key, refillGuard)
     Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: cost === 'normal' ? 'd1_miss' : 'expensive_miss' });
     return release;
   } catch (error) { release(); throw error; }
+}
+
+export async function protectFacet(env, event) {
+  event.search_cost_class = 'uncached';
+  // Facet has its own budget and no cache refill. Reject here before spending
+  // shared D1 tokens; a later D1 rejection cannot refund the facet token.
+  await check(env, event, 'FACET_MISS_LIMITER', 'facet-miss', 'facet_miss');
+  await check(env, event, 'D1_MISS_LIMITER', 'search-d1-miss', 'd1_miss');
+  Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: 'facet_miss' });
 }
 
 export async function protectHealth(env, event) {

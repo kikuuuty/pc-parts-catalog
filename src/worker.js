@@ -1,7 +1,7 @@
 import { categories, models } from './model.js';
 import { searchQuery } from './queries.js';
 import { searchCachePolicy, searchCacheKey, readSearchCache, writeSearchCache } from './search-cache.js';
-import { protectSearch, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
+import { protectSearch, protectFacet, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
 import { loadProductDetail, productDetailCache } from './product-detail.js';
 import { searchWindow, cursorContext, decodeCursor, encodeCursor } from './pagination.js';
 import { validateReferences, resolveProducts } from './product-reference.js';
@@ -212,13 +212,13 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
             try { dynamicFacetQueries(category, input); }
             catch { invalid('Invalid facet conditions; check filter fields, types and ranges'); }
             event.category = category;
-            const release = await protectSearch(env, event, { category, ...input }, 'POST', null, refillGuard);
+            await protectFacet(env, event);
             try {
               payload = await loadDynamicFacets(executeBatch, category, input);
             } catch (error) {
               if (error instanceof FilterOptionLimitError) throw new HttpError(500, 'FILTER_OPTION_LIMIT', `Facet ${error.field} exceeds ${error.limit} options`);
               throw error;
-            } finally { release(); }
+            }
           } else if (filterMatch) {
             const category = filterMatch[1];
             if (!categories.includes(category)) throw new HttpError(404, 'CATEGORY_NOT_FOUND', 'Category not found');
