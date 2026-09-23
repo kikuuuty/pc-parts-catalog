@@ -130,9 +130,9 @@ const finite = value => typeof value === 'number' && Number.isFinite(value) && v
 
 // No CLI, REST credentials, writes, SQL logging, or user-controlled SQL here.
 export function createWorker({ log = entry => console.log(JSON.stringify(entry)), cache: injectedCache, now = Date.now,
-  offerFetch, offerTimeoutMs } = {}) {
+  offerFetch, offerTimeoutMs, offerSleep } = {}) {
   const refillGuard = createRefillGuard();
-  const loadOffers = createOfferService({ fetch: offerFetch, now, timeoutMs: offerTimeoutMs });
+  const loadOffers = createOfferService({ fetch: offerFetch, now, timeoutMs: offerTimeoutMs, sleep: offerSleep });
   return {
     async fetch(request, env) {
       const started = performance.now();

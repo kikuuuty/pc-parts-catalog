@@ -108,7 +108,7 @@ export async function fetchYahooOffers({ appId, jan, fetch: fetcher = globalThis
       // Location: neither credentials nor MISS budget can escape via redirects/retries.
       const response = await fetcher(url, { signal: controller.signal, redirect: 'manual' });
       event.upstream_status_class = `${Math.floor(response.status / 100)}xx`;
-      if (!response.ok) {
+      if (response.status !== 200) {
         void response.body?.cancel().catch(() => {});
         if (response.status === 429) throw rateLimited('upstream_429', retryAfter(response));
         if (response.status >= 500) throw unavailable('upstream_5xx');

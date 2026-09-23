@@ -1,20 +1,51 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validEan13, selectYahooLookup } from '../src/offers/identifiers.js';
+import { validEan13, selectYahooLookupCandidates, MAX_YAHOO_LOOKUP_CANDIDATES } from '../src/offers/identifiers.js';
 import { canonicalIdentifiers } from '../src/product-detail.js';
 import { offerCachePolicy } from '../src/offers/cache.js';
 import { JAN, OTHER_JAN, RYZEN_EAN, ryzen9800 } from '../test-support/yahoo.js';
 
 const ean = (value = RYZEN_EAN, region = 'all', origin = 'upstream') => ({ type: 'ean', value, region, origin, origin_field: 'identifiers' });
+const selectYahooLookup = identifiers => selectYahooLookupCandidates(identifiers)[0] ?? null;
 
-test('valid JAN wins before any EAN candidate is evaluated, including JAN-8 and trim-only JAN', () => {
-  const inaccessibleEan = { type: 'ean', get region() { assert.fail('EAN must not be evaluated'); } };
+test('valid JAN ranks before EAN, including JAN-8 and trim-only JAN', () => {
   for (const value of [JAN, ` ${JAN} `, '00123457']) {
     const jan = { ...ean(value, 'jp'), type: 'jan' };
-    for (const rows of [[jan], [ean(), jan], [jan, inaccessibleEan], [inaccessibleEan, jan]]) {
+    for (const rows of [[jan], [ean(), jan], [jan, ean()]]) {
       assert.deepEqual(selectYahooLookup(rows), { strategy: 'jan', identifier_type: 'jan', value: value.trim() });
     }
   }
+});
+
+test('candidate priority is type > region > grouped local origin > lexical, independent of row order', () => {
+  // Generate valid distinct values in reverse lexical order to exercise every rank.
+  const codes = Array.from({ length: 9 }, (_, i) => {
+    const prefix = String(900000000000 - i);
+    return Array.from({ length: 10 }, (_, n) => prefix + n).find(validEan13);
+  });
+  const rows = ['jan', 'ean'].flatMap((type, t) => ['jp', 'all'].flatMap((region, r) =>
+    ['local', 'upstream'].map((origin, o) => ({ ...ean(codes[t * 4 + r * 2 + o], region, origin), type }))));
+  rows.push({ ...rows[0], origin: 'upstream' });
+  const original = structuredClone(rows);
+  for (const order of [rows, [...rows].reverse()]) {
+    const grouped = canonicalIdentifiers(order);
+    assert.deepEqual(selectYahooLookupCandidates(grouped), codes.slice(0, 8).map((value, i) => ({
+      strategy: i < 4 ? 'jan' : 'ean13_as_jan', identifier_type: i < 4 ? 'jan' : 'ean', value,
+    })));
+  }
+  const ties = [ean(codes[7]), ean(codes[8]), ean(codes[6])];
+  assert.deepEqual(selectYahooLookupCandidates(ties).map(c => c.value), [codes[8], codes[7], codes[6]]);
+  assert.deepEqual(rows, original);
+  assert.equal(MAX_YAHOO_LOOKUP_CANDIDATES, 3);
+});
+
+test('deduplicate normalized lookup values across origins, regions and types before limiting attempts', () => {
+  const rows = [ean(JAN), ean(JAN, 'jp', 'local'), { ...ean(` ${JAN} `, 'all'), type: 'jan' },
+    { ...ean(JAN, 'jp'), type: 'jan' }, ean(JAN, 'jp'), ean(OTHER_JAN)];
+  assert.deepEqual(selectYahooLookupCandidates(canonicalIdentifiers(rows)), [
+    { strategy: 'jan', identifier_type: 'jan', value: JAN },
+    { strategy: 'ean13_as_jan', identifier_type: 'ean', value: OTHER_JAN },
+  ]);
 });
 
 test('EAN-13 fallback preserves leading zero and never changes canonical metadata', () => {

@@ -1,7 +1,8 @@
 # Product Offers — Yahoo!ショッピング
 
 `GET /v1/products/:id/offers` は、選択済みのactiveなカタログ製品について、
-canonical JANを最優先し、選択できなければcanonical EAN-13でYahoo!ショッピングの商品検索（v3）を1回呼び、販売候補を返します。
+canonical JANを最優先し、canonical EAN-13も含む上位最大3候補を順番にYahoo!ショッピングの商品検索（v3）で照合します。
+正常な200応答を正規化してOfferが0件だった場合だけ次候補へ進み、最初の完全一致Offerを返します。
 初版はYahooのみ。価格はD1へ保存せず、catalog検索の並び順にも使用しません。
 
 ## HTTP contract
@@ -10,7 +11,7 @@ canonical JANを最優先し、選択できなければcanonical EAN-13でYahoo!
 - inactive／存在しない製品は404 `PRODUCT_NOT_FOUND`。不正pathは404、unsafe整数は400。
 - browser responseは常に`Cache-Control: no-store`。内部キャッシュのみTTLを持ちます。
 - `X-Cache: HIT / MISS / BYPASS`、`X-Cache-TTL`、HITの`Age`は**Offer cache**についての値。
-  request IDとtelemetryは毎回生成し、キャッシュしません。
+  最後に評価したcandidateのcache状態を表します。request IDとtelemetryは毎回生成し、キャッシュしません。
 
 成功例（コード・価格は説明用）:
 
@@ -48,7 +49,7 @@ canonical JANを最優先し、選択できなければcanonical EAN-13でYahoo!
 }
 ```
 
-Yahoo検索が0件、または安全に採用できる一致商品が0件なら、`complete`＋`offers: []`。
+上位最大3候補すべてで安全に採用できる一致商品が0件なら、`complete`＋`offers: []`。
 安全なJANもEAN-13もない場合は**Yahooを呼ばず**200を返します。App IDも不要です。
 
 ```json
@@ -65,20 +66,27 @@ Yahoo検索が0件、または安全に採用できる一致商品が0件なら�
 `canonicalIdentifiers()`が保持する`type/value/region/origins`を使用します。
 `jan`型、regionが`jp`または`all`、ASCII数字8桁または13桁、チェックデジットが正しいものだけを採用。
 全桁0は拒否します。trim以外の変形・数値化はせず、先頭0を保持します。
-有効なJANが選べた場合はEAN candidateを評価しません。JAN lookupの0件・provider errorを理由にEANへ再検索することもありません。
+候補は次の優先順で列挙します（他regionは対象外）。
 
-複数候補は次の優先順で1つだけ選びます。
+1. JAN / `jp` / local
+2. JAN / `jp` / upstream
+3. JAN / `all` / local
+4. JAN / `all` / upstream
+5. EAN-13 / `jp` / local
+6. EAN-13 / `jp` / upstream
+7. EAN-13 / `all` / local
+8. EAN-13 / `all` / upstream
 
-1. `jp` → `all`（他regionは対象外）
-2. 同じregionなら`origins`に`local`を含むもの → upstreamのみ
-3. 同順位はtrim済みコードの文字列昇順
+grouped identifierの`origins`にlocalを含む場合はlocalと判定します。
+同順位だけvalueの文字列昇順（JANはtrim済み）で安定化し、同じlookup valueはtype／region／originをまたいでも
+最上位のcandidateだけ残します。`MAX_YAHOO_LOOKUP_CANDIDATES = 3`でcache照合と外部試行を最大3候補に制限します。
 
 local identifierは既存`addLocalIdentifier()`経由の、evidenceを持つcanonical追加を意味します。
 `verified_at`はcanonical viewにはないため、検証日による優先順位は推定しません。
-複数JANすべてを検索する仕組みではありません。コードの有効性はSKU割当の正しさまで保証しないので、
+コードの有効性はSKU割当の正しさまで保証しないので、
 local追加には製品と一致する根拠を付けてください。
 
-JANを選択できない場合のみ、`type=ean`、**13桁ASCII数字・正しいcheck digit・全桁0以外**を許可します。
+JANの後に、`type=ean`、**13桁ASCII数字・正しいcheck digit・全桁0以外**を候補にします。
 EAN-8、UPC-12、GTIN-14、数値型、全角、ハイフン、空白（前後も含む）、チェックデジット不正は拒否。
 EAN文字列は修復・trim・数値化せず使用し、`0730143315289`の先頭0を削除／追加しません。
 JAN-8およびJANの既存trim方針は維持します。check digit計算のみ共通化しています。
@@ -88,11 +96,15 @@ EANもregionは`jp`／`all`に限定し、優先順位はJANと同じくregion �
 `us`が59行でした（snapshot `eec0df175504ebd15f0f3e3a8249a18a22f00940`）。region欠損/nullは存在しないため許可しません。
 `us`等の他国regionは検索対象外。`jp`は既存local identifierの国内向けmetadata規則に合わせています。
 
-`selectYahooLookup()`は内部で`{ strategy, identifier_type, value }`を返します。
+`selectYahooLookupCandidates()`は内部で`{ strategy, identifier_type, value }`の優先順位付き配列を返します。
 JANは`{ strategy: 'jan', identifier_type: 'jan', value }`、EANは
 `{ strategy: 'ean13_as_jan', identifier_type: 'ean', value }`です。
 **canonical DBのEANをJANへ変換・追加する処理ではなく、Yahoo Providerだけのlookup policy**です。
 transportはcanonical typeを判断せず、どちらの値もそのままYahooの`jan_code`へ渡します。
+
+**200応答をexact match／正規化して0件の場合だけfallback**します（正常結果のcache HIT `[]`も同様）。
+timeout、network、429、4xx／5xx、200以外のstatus、JSON／response破損、内部保護失敗では即時errorです。
+最初の非空candidateで終了し、別identifierのOfferをunionしません。すべて空なら最後のcandidateのstrategyを返します。
 
 APIの`lookup`は従来形式のまま、EAN時だけ以下のstrategyになります。
 
@@ -104,6 +116,12 @@ APIの`lookup`は従来形式のまま、EAN時だけ以下のstrategyになり�
 `0730143315289`ほか複数が`region=all / origin=upstream`で存在し、lexical順に上記コードを選択します。
 MPN `100-100001084WOF`やUPC `730143315289`はfallbackに使用しません。
 商品IDはDBごとに異なり得るため、実行前にDetailで製品名とidentifiersを確認してください。
+
+A3-mATX White / Brown Wood **Mesh Side Panel**（local ID 22309、upstream ID
+`a00aa6fd-61a1-41a7-a259-debd7cdb7cf4`）は、canonical EANが`0840353046559`と`4718466015815`で、
+どちらも`all / upstream`です（2026-09-24にlocal D1のcanonical viewとupstreamレコードを照合）。
+回帰fixtureは1番目が200／0件、2番目の`4718466015815`がexact Offerを返す条件です。
+別製品のTempered Glass版や製品名・MPNによる検索は使いません。
 
 ## Yahoo request / normalization
 
@@ -196,6 +214,8 @@ seller logo URLを取得できるProviderでは`seller.image.url`へ直接mappin
    runtimeで不正設定は503、release validationでも拒否。epoch不正／未設定やCache APIなしはBYPASS。
 4. 200の正規化済み結果（0件も含む）だけ保存。エラー・unsupported・request metadataは保存しません。
    期限切れは再取得し、stale fallbackやHITによるTTL延長はありません。
+   各candidateのcacheを順に確認するため、`HIT [] → HIT offers`なら外部アクセスなしで解決します。
+   product単位のlookup-resolution cacheは追加しません。
 5. cache match/put障害でもYahoo専用保護を必ず通します。取得成功なら200＋BYPASS。
 
 catalog releaseのepoch更新でDetailとOfferの両方を切り替え、DB再構築時のID再割当やidentifier変更と分離します。
@@ -203,12 +223,15 @@ out-of-bandなidentifier／active変更にはepoch更新が必要です。更新
 Detailの最大600秒の鮮度期間中は旧identifier／active状態が見える点は既存Detailと同じです。
 新しいidentifier／strategyを選択した後は別Offer keyになるので旧lookupの価格を混ぜません。
 
-外部MISSにだけ`YAHOO_OFFER_MISS_LIMITER`を適用します。
+各外部MISSに`YAHOO_OFFER_MISS_LIMITER`を適用します。3候補がすべてMISSなら3 tokenです。
 production `29599007` / local `29599107`、共通キー`yahoo-offer-miss`、**30回/60秒**。
 HIT・unsupported・missing App IDではYahoo tokenを消費しません。
 同一isolate・同一cache keyの同時MISSはPromiseを共有し、外部requestとtokenを1つに集約します。
 in-flight mapは最大32 keys、完了・失敗時に除去。Detail自体がcoldの場合は既存refill guardも作用します。
 さらに同一isolateでは外部開始間隔を最低1秒とし、短時間のuncached burstは503＋Retry-After: 1で拒否します。
+外部取得を開始した処理だけが、その処理のfallbackのために不足する間隔を待機できます。
+limiter／fetch／cache write／fallback待機中はその処理が外部admissionを保持し、別MISSの待機queueは作りません。
+候補単位のHITと同一keyのcoalescingは引き続き使用できます。成功・失敗いずれでもadmissionを解放します。
 
 Cloudflare Cache APIはcolo-local、Rate Limiting bindingはcolo-local/eventually consistentです。
 したがって30/分は全利用者で共有する**保守的な場所別予算**であり、厳密な全世界共通上限ではありません。
@@ -239,6 +262,10 @@ YahooのRetry-Afterは1〜3600の整数秒だけ採用し、それ以外は60秒
 offer_cache_status/error、offer_coalesced、upstream_status_class/duration_ms、offer_count、
 provider_error_reason、rate_limit_classと既存D1/elapsed情報だけを追加します。
 `lookup_strategy`は`jan`／`ean13_as_jan`／nullのみで、利用率を区別できます。
+`lookup_candidate_count`は上限適用後の候補数（0〜3）、`lookup_attempts`は評価した候補数
+（cache HIT／coalesced／失敗した候補も含む0〜3）、`lookup_hit_index`は最初に非空Offerを得た候補の
+1-based位置（1〜3、未取得・unsupported・errorは0）です。strategyは最後に評価した候補を示します。
+公開`lookup` contractにfieldsは追加しません。
 JAN・EAN値・product名・seller URL・App ID・完全upstream URLはログに記録しません。
 
 ## Secretと実API smoke
@@ -264,6 +291,10 @@ npm run smoke:yahoo -- --live --jan <verified-JAN>
 # local endpointの手動確認。canonical JANまたは対応EAN-13を持つactive IDを選ぶ
 npm run worker:dev
 curl http://127.0.0.1:8787/v1/products/<product-id>/offers
+
+# A3メッシュ版＋9800X3Dの実local Worker検証（実Yahoo呼出し）
+# 隔離port／cache epochで起動し、検証後にそのWorkerだけ停止
+node scripts/verify-yahoo-fallback-local.js --live --a3-id 22309 --ryzen-id 372
 ```
 
 smokeは`.dev.vars.local`または環境変数を読み、App ID欠落／`--live`なしでは外部アクセスしません。
@@ -311,6 +342,21 @@ JAN exactの契約を保ってcache世代を更新してください。他Provid
 plugin framework、価格履歴、アフィリエイト、推定送料、ポイント実質価格、購入処理はありません。
 
 ## ローカル検証結果
+
+複数canonical identifier fallback追加時（2026-09-24、production deployなし）:
+
+- `npm test`: 全299 tests成功、skip 0（13 tests追加、既存error testsも複数候補で拡張）。
+- `npm run check`: schema check＋全299 tests成功。
+- `npm run verify:protection`: 29 tests成功。`git diff --check`成功。
+- 候補の全8順位／grouped origins／重複排除、最大3候補、各位置のhit／全空、1番目と2番目のprovider error、
+  exact mismatch排除、各実requestのtoken、candidate cache、1秒pacing、同時chainのcoalescing、
+  fallback待機中の別MISS burst拒否とHIT許可をfixtureで検証。
+- `node scripts/verify-yahoo-fallback-local.js --live`成功。既存local D1と実App IDを使う実workerdで、
+  A3-mATXメッシュ版は1番目0件→**2番目hit、2 Offer**、9800X3Dは**1番目hit、1 request、27 Offer**。
+  件数は実行時の観測値です。live検証では1件以上と正しいcandidateをassertします。
+- 両製品とも2回目はcandidate cache HIT、`rate_limit_status=not_checked`、本文／画像／seller／`fetched_at`維持。
+  canonical identifiers保持と、telemetryにコード・商品名・URLがないことも検証。
+  bounded結果レポートは`.cache/offer-fallback-live-report.json`。
 
 EAN-13 fallback追加時（2026-09-23、production deployなし）:
 

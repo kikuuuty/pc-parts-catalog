@@ -11,6 +11,21 @@ export const ryzen9800 = {
     { type: 'upc', value: '730143315289', region: 'all' },
   ] },
 };
+// Canonical local D1 product 22309, upstream PCCase/a00aa6fd-61a1-41a7-a259-debd7cdb7cf4.
+// White / Brown Wood Mesh (not the separate tempered-glass variant), checked 2026-09-24.
+export const A3_FIRST_EAN = '0840353046559';
+export const A3_YAHOO_EAN = '4718466015815';
+export const a3WhiteWoodMesh = {
+  opendb_id: 'a00aa6fd-61a1-41a7-a259-debd7cdb7cf4',
+  metadata: { name: 'Lian Li A3-mATX Micro ATX Mini Tower White / Brown Wood Mesh Side Panel', manufacturer: 'Lian Li' },
+  side_panel: 'Mesh',
+  identifiers: { version: 1, identifiers: [
+    ...[A3_FIRST_EAN, A3_YAHOO_EAN].map(value => ({ type: 'ean', value, region: 'all' })),
+    ...['A3-MATX-WD WHITE', 'A3-mATX-WD White', 'A3W-WD', 'G99.A3W-WD.00', 'PC-A3W-WD']
+      .map(value => ({ type: 'mpn', value, region: 'all' })),
+    { type: 'upc', value: '840353046559', region: 'all' },
+  ] },
+};
 export const yahooHit = (changes = {}) => ({
   name: 'Example PC part', code: 'tsukumo-y_item', janCode: JAN, price: 69800,
   imageId: 'example-product-image',
