@@ -1,9 +1,20 @@
 import { parseSearchIntent } from './search-intent.js';
+import { categories } from './model.js';
+
+// Validated, canonical first-page category listing only. An explicit field
+// allowlist keeps future GET conditions from silently entering this bounded tier.
+function initialCategoryListing(input) {
+  return categories.includes(input.category) &&
+    (input.limit === undefined || input.limit === 20) &&
+    (input.offset === undefined || input.offset === 0) &&
+    Object.keys(input).every(key => input[key] === undefined || ['category', 'limit', 'offset'].includes(key));
+}
 
 // Request-derived admission only; never changes the input, SQL or search results.
 // "normal" is not a promise of cheap execution. The all-MISS breaker always applies.
 export function classifySearchCost(input, { method = 'GET', cacheEligible = true } = {}) {
   if (method !== 'GET' || !cacheEligible) return 'uncached';
+  if (initialCategoryListing(input)) return 'bootstrap';
   if (!input.keyword) return 'expensive';
   const intent = parseSearchIntent(input.category, input.keyword);
   if (intent.specOnly || intent.family || intent.identity) return 'expensive';
@@ -18,7 +29,12 @@ export const protectionBindings = [
   { name: 'EXPENSIVE_MISS_LIMITER', namespace_id: '29599003', simple: { limit: 20, period: 60 } },
   { name: 'HEALTH_LIMITER', namespace_id: '29599004', simple: { limit: 60, period: 60 } },
   { name: 'FACET_MISS_LIMITER', namespace_id: '29599005', simple: { limit: 30, period: 60 } },
+  { name: 'BOOTSTRAP_MISS_LIMITER', namespace_id: '29599006', simple: { limit: 40, period: 60 } },
 ];
+
+export const localProtectionBindings = protectionBindings.map(binding => ({
+  ...binding, namespace_id: String(Number(binding.namespace_id) + 100),
+}));
 
 export class ProtectionError extends Error {
   constructor(unavailable, period, health = false) {
@@ -62,9 +78,7 @@ export function createRefillGuard() {
   };
 }
 
-export async function protectSearch(env, event, input, method, key, refillGuard) {
-  const cost = classifySearchCost(input, { method, cacheEligible: !!key && !event.cache_error });
-  event.search_cost_class = cost;
+async function protectRefill(env, event, key, refillGuard) {
   const release = key ? refillGuard(key.url) : () => {};
   if (!release) {
     Object.assign(event, { rate_limit_status: 'denied', rate_limit_class: 'query_inflight' });
@@ -78,6 +92,29 @@ export async function protectSearch(env, event, input, method, key, refillGuard)
       const digest = Array.from(new Uint8Array(hash), b => b.toString(16).padStart(2, '0')).join('');
       await check(env, event, 'QUERY_REFILL_LIMITER', digest, 'query_refill');
     }
+    return release;
+  } catch (error) { release(); throw error; }
+}
+
+// Called only after validation and a cache-eligible lookup MISS, never for HITs.
+export async function protectBootstrap(env, event, key, refillGuard) {
+  event.search_cost_class = 'bootstrap';
+  const release = await protectRefill(env, event, key, refillGuard);
+  try {
+    // Dedicated tier first. A shared D1 rejection cannot refund this token.
+    await check(env, event, 'BOOTSTRAP_MISS_LIMITER', 'bootstrap-miss', 'bootstrap_miss');
+    await check(env, event, 'D1_MISS_LIMITER', 'search-d1-miss', 'd1_miss');
+    Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: 'bootstrap_miss' });
+    return release;
+  } catch (error) { release(); throw error; }
+}
+
+export async function protectSearch(env, event, input, method, key, refillGuard) {
+  const cost = classifySearchCost(input, { method, cacheEligible: !!key && !event.cache_error });
+  if (cost === 'bootstrap') return protectBootstrap(env, event, key, refillGuard);
+  event.search_cost_class = cost;
+  const release = await protectRefill(env, event, key, refillGuard);
+  try {
     // Restricted tier first, so rejected expensive traffic does not drain normal tokens.
     // Bindings are not a transaction: a later rejection cannot refund earlier tokens.
     if (cost !== 'normal') await check(env, event, 'EXPENSIVE_MISS_LIMITER', 'search-expensive-miss', 'expensive_miss');
@@ -101,15 +138,23 @@ export async function protectHealth(env, event) {
   Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: 'health' });
 }
 
-// Predeploy must reject missing, shared, or silently loosened production bindings.
+// Predeploy must reject missing, shared, or silently loosened bindings in either environment.
 export function validateProtectionConfig(config) {
-  if (!Array.isArray(config.ratelimits) || config.ratelimits.length !== protectionBindings.length) throw new Error('Missing production rate limit bindings');
-  for (const expected of protectionBindings) {
-    const matches = config.ratelimits.filter(b => b.name === expected.name);
-    const actual = matches[0];
-    if (matches.length !== 1 || actual.namespace_id !== expected.namespace_id ||
-        actual.simple?.limit !== expected.simple.limit || actual.simple?.period !== expected.simple.period) {
-      throw new Error(`Invalid production rate limit binding: ${expected.name}`);
+  const namespaces = new Set();
+  for (const [environment, actualBindings, expectedBindings] of [
+    ['production', config.ratelimits, protectionBindings],
+    ['local', config.env?.local?.ratelimits, localProtectionBindings],
+  ]) {
+    if (!Array.isArray(actualBindings) || actualBindings.length !== expectedBindings.length) throw new Error(`Missing ${environment} rate limit bindings`);
+    for (const expected of expectedBindings) {
+      const matches = actualBindings.filter(b => b.name === expected.name);
+      const actual = matches[0];
+      if (matches.length !== 1 || actual.namespace_id !== expected.namespace_id ||
+          actual.simple?.limit !== expected.simple.limit || actual.simple?.period !== expected.simple.period ||
+          namespaces.has(actual.namespace_id)) {
+        throw new Error(`Invalid ${environment} rate limit binding: ${expected.name}`);
+      }
+      namespaces.add(actual.namespace_id);
     }
   }
   const epoch = config.vars?.CATALOG_CACHE_EPOCH;

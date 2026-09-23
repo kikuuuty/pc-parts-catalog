@@ -109,7 +109,7 @@ option上限を超えた場合は全responseを500 `FILTER_OPTION_LIMIT`にし�
 - unknown body/condition field、不正な型・範囲・複雑度、query parameter: 400 `INVALID_REQUEST`。
 - 大きすぎるbody: 413。JSON以外: 415。GET等: 405 (`Allow: POST, OPTIONS`)。
 - OPTIONSは204、既存public CORS `*`。DB障害は既存の秘匿化された500/503。
-- **キャッシュなし**: `Cache-Control: no-store`, `X-Cache: BYPASS`。専用の`protectFacet()`で`FACET_MISS_LIMITER`（30/60秒）→`D1_MISS_LIMITER`（60/60秒）の順に判定します。`EXPENSIVE_MISS_LIMITER`・query refill limiterは消費しません。
+- **キャッシュなし**: `Cache-Control: no-store`, `X-Cache: BYPASS`。専用の`protectFacet()`で`FACET_MISS_LIMITER`（30/60秒）→`D1_MISS_LIMITER`（60/60秒）の順に判定します。`EXPENSIVE_MISS_LIMITER`・`BOOTSTRAP_MISS_LIMITER`・query refill limiterは消費しません。
 - Worker telemetryはroute、SQL数、batch操作数、rows_read/written、durationを記録します。条件値やSQLは記録しません。
 - 静的GETのepoch cache / TTL / browser再検証ポリシーは継続します。
 
@@ -118,10 +118,12 @@ option上限を超えた場合は全responseを500 `FILTER_OPTION_LIMIT`にし�
 ```text
 Facet → FACET_MISS_LIMITER (30/60秒) → D1_MISS_LIMITER (60/60秒) → D1
 Search (expensive / uncached) → EXPENSIVE_MISS_LIMITER (20/60秒) → D1_MISS_LIMITER → D1
+Bootstrap → QUERY_REFILL_LIMITER (2/10秒) → BOOTSTRAP_MISS_LIMITER (40/60秒) → D1_MISS_LIMITER → D1
 ```
 
 `POST /v1/search`は引き続きSearch側の20/60秒budgetを使用します。normal GET MISSはD1側、cache HITはMISS limiterを消費しません。
-両方の専用budgetを分離しても、D1 admissionは同じbinding・keyで合算し、60/60秒の最終防衛線を維持します。これはrequest単位のadmissionで、1 Facet request内のSQL数ではありません。Workers bindingはcolo-local / eventually consistentであり、worldwideで厳密な60件を保証するものではありません。
+Bootstrapは静的metadataとcanonical初期category listingのcache MISSのみです（[判定条件](production-rate-limiting.md)）。Searchにもcache keyがあれば既存query refillを適用します。
+3つの専用budgetを分離しても、D1 admissionは同じbinding・keyで合算し、60/60秒の最終防衛線を維持します。これはrequest単位のadmissionで、1 Facet request内のSQL数ではありません。Workers bindingはcolo-local / eventually consistentであり、worldwideで厳密な60件を保証するものではありません。
 
 Facet専用拒否は後段のD1 tokenを消費せず、D1実行0で429を返します。bindingは非transactionalなので、後段のD1 limiterによる拒否では既に消費したFacet tokenを返却できません。
 両limiterの429は`Retry-After: 60`。公開エラーは既存の`RATE_LIMITED` / `Too many search requests`と`request_id`を維持し、binding欠落・例外・不正応答ではfail-closedの503 `PROTECTION_UNAVAILABLE`（同じく60秒）になります。

@@ -159,7 +159,7 @@ test('deterministic output, CPU manufacturer precedence, cache HIT/epoch/expiry 
   const changed = await h.metadata('cpu'); assert.equal(changed.headers.get('X-Cache'), 'MISS');
   assert((await changed.json()).filters.find(f => f.id === 'socket').options.some(o => o.value === 'AM5'));
   h.advance(600001); assert.equal((await h.metadata('cpu')).headers.get('X-Cache'), 'MISS');
-  h.env.EXPENSIVE_MISS_LIMITER.limit = async () => ({ success: false });
+  h.env.BOOTSTRAP_MISS_LIMITER.limit = async () => ({ success: false });
   const denied = await h.metadata('gpu'); assert.equal(denied.status, 429);
   assert.equal(denied.headers.get('Cache-Control'), 'no-store'); assert.equal(h.events.at(-1).d1_queries, 0);
 });

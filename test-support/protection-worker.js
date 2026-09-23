@@ -13,7 +13,9 @@ export function protectionWorker({ limits, unlimited = false, rowsRead = 35963, 
     DB: { prepare: sql => ({ bind: (...params) => ({ all: async () => {
       statements.push({ sql, params });
       if (blockedDB) await blockedDB;
-      return { success: true, results: [], meta: { rows_read: rowsRead, rows_written: 0, duration: 1 } };
+      // Scalar filter aggregates return one row even for an empty catalog.
+      const results = sql.startsWith('SELECT json_group_array(DISTINCT ') ? [{}] : [];
+      return { success: true, results, meta: { rows_read: rowsRead, rows_written: 0, duration: 1 } };
     } }) }) },
   };
   const worker = createWorker({ cache, log: event => logs.push(event), now: () => clock });

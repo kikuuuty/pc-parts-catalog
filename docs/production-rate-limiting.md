@@ -1,5 +1,42 @@
 # Production D1 read protection — 2026-09-13
 
+## UI bootstrap resource分離（2026-09-23、実装・offline検証）
+
+**bounded-cardinalityかつcacheableなUI bootstrap trafficを、任意にunique queryを生成できるexpensive Searchからresource isolationします。** UI初期表示時のmetadataと初期一覧がSearchの20/60秒budgetを共有していたため、専用40/60秒へ分離します。Dynamic Facetの呼出し有無や、特定のカテゴリ数・開く順番に依存する特例ではありません。
+
+```text
+Bootstrap cold MISS → QUERY_REFILL_LIMITER 2/10
+                    → BOOTSTRAP_MISS_LIMITER 40/60 → D1_MISS_LIMITER 60/60 → D1
+Expensive Search    → EXPENSIVE_MISS_LIMITER 20/60 → D1_MISS_LIMITER 60/60 → D1
+Dynamic Facet       → FACET_MISS_LIMITER 30/60     → D1_MISS_LIMITER 60/60 → D1
+```
+
+Searchもcache keyがあれば既存query refill / in-flight guardを先に適用します。normal Searchは専用tierなしで共通D1を通ります。
+
+bootstrap対象はvalidation済みの次の2種類のみです。
+
+- `GET /v1/categories/:category/filters`: category allowlist内、query parameterなし、内部Cache API MISS。
+- `GET /v1/search`: allowlist内category、keywordなし、cursorなし、offset=0または省略、limit=20または省略、追加検索条件なし、cache eligibleかつlookup MISS。正規化後の入力fieldを`category / limit / offset`に限定します（undefinedは条件なし）。`filters / ranges / facets / identifier / orderBy / include`や将来追加されるfieldがあればbootstrapにしません。
+
+既存GET contractで数値表記・parameter順序・default省略をcanonical keyへ正規化するため、別表記によってkey空間を増やせません。カテゴリごとにmetadataと初期一覧の2 keysだけです（同一origin / release / server-side cache policy内）。単なるGET・cacheable判定ではありません。
+keywordは既存normal/expensive classifier、POST Searchはuncached/expensive、cursorと非標準paginationは既存保護を使います。Product Detailは高cardinalityなので従来のexpensive保護、Product resolveも従来どおりです。Dynamic Facetは独立30/60秒を維持します。
+
+`protectBootstrap()`はrefill → bootstrap専用 → 共通D1の順です。専用拒否ではD1 token追加消費0。後段D1拒否ではbootstrap tokenを返却できません。Cache APIなし・設定不正/無効・lookup例外では既存uncached/expensive保護へ戻り、HITでは全limiter・D1を省略します。put例外もD1前の保護を通過済みです。
+
+設定はproduction `29599006` / local `29599106`、両方40/60秒。既存namespaceは維持し、6 bindings × 2環境の全12 namespacesをstrict validationします。欠落・namespace/limit/period相違・重複は失敗し、`check-rate-namespaces.js`もproduction/local全IDのaccount内衝突を検査します。
+telemetryは`search_cost_class=bootstrap`を追加し、専用許可/拒否は`rate_limit_class=bootstrap_miss`、後段拒否は`d1_miss`。429の公開契約とD1 queries/read/write=0を維持します。IP tracking、client指定budget key、public/admin bypassは追加しません。
+
+deterministic testsは40許可→41件目専用拒否、20 Search＋20 Bootstrap＋20 Facetの独立budgetと61件目D1拒否、token非返却、canonical refill、in-flight、HIT token/D1=0、分類境界、fail closedを検証します。
+既存`verify-rate-smoke.js`はSearchの`EXPENSIVE_MISS_LIMITER` contract smokeのままです。bootstrapのproduction 40→41 probeは追加しません。metadataのcold read量は大きくなり得るため、将来のproduction確認は1〜数requestで200 / allowed / bootstrap_miss、MISS時のみD1、次回HITならD1=0の観測に限定します。このbootstrap実装作業ではproduction deployを行いません。
+
+実装後の検証結果:
+
+- `npm run check`: schema一致、252 tests成功（skip 0）。`npm run verify:protection`: 29 tests成功。
+- `node scripts/check-rate-namespaces.js`: account内1 Worker、production/local全12 namespacesで衝突0。strict configの欠落・namespace/limit/period相違・重複拒否は両環境でテスト成功。
+- `node --check src/search-protection.js`、`git diff --check`: 成功。
+- `npm run verify:worker:local`: 新40/60 bindingを含むWorker起動成功。ただし既存検証snapshot `992dacfa…`とlocal D1 `eec0df17…`が不一致のため、拡張HTTP suite前に停止（`.cache/api-local-production.json`）。
+- 追加のlocal Worker限定確認: CPU metadataと初期一覧を各MISS→HITで取得し、全200・MISSのallowed/bootstrap_miss・HITのnot_checkedとD1 query/read/write=0・本文一致を確認。metadata MISSは1 query / 1,579 reads、初期一覧MISSは1 query / 42 reads。`q=ryzen`はexpensive_missを維持。これは拡張HTTP suiteの成功を代替するものではない。起動したWorker process treeは終了済み。
+
 ## Dynamic Facet rate分離（2026-09-23）
 
 現行コードではDynamic Facetのbudgetを通常Searchから分離しています。以下のproduction実測・version情報は2026-09-13の導入時記録であり、この分離のdeploy実績ではありません。
@@ -11,10 +48,10 @@ Search (expensive / uncached) → EXPENSIVE_MISS_LIMITER (20/60秒) → D1_MISS_
 
 `protectFacet()`はvalidation後、Facet専用→共通D1の順で判定し、Searchのexpensive budget・query refillは使用しません。Facet専用拒否はD1 tokenを消費せず、D1実行0で429。後段D1拒否では前段Facet tokenは返却できません。
 `POST /v1/search`とexpensive GET MISSの20/60秒、normal GET MISSのD1保護、cache HITのtoken消費0、query refill guardは維持します。
-共通D1はFacet・Searchの合計request admissionを制限します。1 requestが複数SQLを実行してもtokenは1つです。「global」は全検索系で共有する意味であり、bindingのcolo-local / eventualな性質は変わりません。
+共通D1はFacet・Search・Bootstrapの合計request admissionを制限します。1 requestが複数SQLを実行してもtokenは1つです。「global」は全検索系で共有する意味であり、bindingのcolo-local / eventualな性質は変わりません。
 
 **Facetの30/60秒は恒久値ではなくproduction telemetryを見て調整する初期threshold**です。route/colo別の`facet_miss`・`expensive_miss`・`d1_miss`の429率を分け、許可時の`rows_read`、`d1_queries`、SQL/HTTP latency、runtime CPU p95/max、503 `unavailable`を併せて確認します。Facetの拒否率だけを見てD1全体の余裕を判断しないでください。
-threshold変更は`protectionBindings`・Wrangler production/localを同時に更新し、厳密なpredeploy検証を維持します。現在は5 bindings、production/local合計10 namespacesです。namespace照合scriptは`protectionBindings`を列挙するため新Facet bindingも自動的に対象になります。
+threshold変更は`protectionBindings`・Wrangler production/localを同時に更新し、厳密なpredeploy検証を維持します。Facet分離時は5 bindings / 合計10 namespaces、上記bootstrap追加後は6 bindings / 合計12 namespacesです。
 
 分離実装の検証（2026-09-23、production deploy前）:
 
@@ -81,7 +118,7 @@ Workers HTTP request料金はHITでも残る。
 実装: `src/worker.js` / `src/search-protection.js`。既存`src/search-cache.js`を使用。
 
 ```text
-Search request（Dynamic Facetは上記の独立経路）
+Search / Filter metadata request（Dynamic Facetは上記の独立経路）
   ↓ route/method/body/HTTP validation
   ↓ searchQuery validation・SQL生成（DB実行なし）
   ↓ GET Cache API lookup
@@ -90,11 +127,11 @@ Search request（Dynamic Facetは上記の独立経路）
        ↓ request-derived cost classification
        ↓ cache keyあり: isolate内 in-flight guard
        ↓ cache keyあり: QUERY_REFILL_LIMITER
-       ↓ expensive / uncached: EXPENSIVE_MISS_LIMITER
-       ↓ 全検索: D1_MISS_LIMITER
+       ↓ bootstrap: BOOTSTRAP_MISS_LIMITER / expensive・uncached: EXPENSIVE_MISS_LIMITER
+       ↓ 全検索・bootstrap: D1_MISS_LIMITER
        ├─ denied → 429 / no-store / D1=0 / cache put=0
        ├─ unavailable → 503 / no-store / D1=0
-       └─ allowed → 既存SQLを1回実行 → 同一JSON生成
+       └─ allowed → 既存SQLを実行 → 同一JSON生成
                       ↓ eligible GET 200のみcache put
                       ↓ finallyでin-flight guard解放
 ```
@@ -109,12 +146,13 @@ categories/OPTIONS/validation失敗はbindingもD1も呼ばない。healthは独
 |binding名|namespace|period|limit|key|対象|
 |---|---:|---:|---:|---|---|
 |`QUERY_REFILL_LIMITER`|`29599001`|10秒|2|canonical Cache API request URLのSHA-256、64 hex文字|cache keyを持つ非HIT検索|
-|`D1_MISS_LIMITER`|`29599002`|60秒|60|`search-d1-miss`|D1へ進む全検索|
-|`EXPENSIVE_MISS_LIMITER`|`29599003`|60秒|20|`search-expensive-miss`|expensive GET MISS、Search/resolve POST、非cache pagination、cache障害/停止（Dynamic Facetを除く）|
+|`D1_MISS_LIMITER`|`29599002`|60秒|60|`search-d1-miss`|D1へ進むSearch・Bootstrap・Facet・Detail/resolve|
+|`EXPENSIVE_MISS_LIMITER`|`29599003`|60秒|20|`search-expensive-miss`|expensive GET MISS、Detail MISS、Search/resolve POST、非cache pagination、cache障害/停止（Dynamic Facetを除く）|
 |`HEALTH_LIMITER`|`29599004`|60秒|60|`d1-health`|GET `/v1/health` のSELECT 1直前|
 |`FACET_MISS_LIMITER`|`29599005`|60秒|30|`facet-miss`|POST `/v1/categories/:category/facets`|
+|`BOOTSTRAP_MISS_LIMITER`|`29599006`|60秒|40|`bootstrap-miss`|cache eligibleなFilter metadata・canonical初期category listingのMISS|
 
-namespaceはsecretではなくrepository内でstable。local環境は別namespace **29599101〜29599105**、同じthreshold。Facet用はproduction `29599005` / local `29599105`。既存IDは維持します。
+namespaceはsecretではなくrepository内でstable。local環境は別namespace **29599101〜29599106**、同じthreshold。Facet用はproduction `29599005` / local `29599105`、Bootstrap用は`29599006` / `29599106`。既存IDは維持します。
 `scripts/check-rate-namespaces.js`でaccountの現在のWorker設定をread-only列挙し、**1 Worker、他bindingとの衝突0**を確認した。
 将来の別Worker/過去version/手動設定まで永続予約するregistryではない。新規namespace導入時・他Worker追加時にも照合する。
 
@@ -123,9 +161,9 @@ isolate内guardは同keyで同時2件、最大128 active keys。requestのD1・c
 128はquery費用からのquotaではなく、eventualな超過や遅いD1でもisolate内メモリを有限にする防御上限。
 
 refillを先に判定し、同一keyの拒否が他の予算を消費するのを避ける。
-expensiveを全MISSより先に判定し、拒否したexpensive連打でnormal用tokenまで枯らさない。
+expensive / bootstrap / facetの専用tierを共通D1より先に判定し、専用拒否で他class用のD1 tokenまで枯らさない。
 各bindingは非transactionalで、後段で拒否されても前段のtokenは返却できない。
-refill token取得後にexpensive/globalが拒否すると、そのkeyの次のrefillが10秒window内で拒否される可能性がある。
+refill token取得後にexpensive/bootstrap/globalが拒否すると、そのkeyの次のrefillが10秒window内で拒否される可能性がある。
 **その場合も既存HITは通す**。上限はD1成功件数ではなく各binding呼出しadmissionに対する近似値。
 
 ### Identity / privacy / fairness
@@ -163,10 +201,11 @@ threshold設定前にproduction APIで11検索を実測した。tailの`request_
 before/afterは時刻の違う小標本で、SQL/HTTP時間の改善をlimiterの効果と断定しない。
 baseline合計は前後とも144,866 reads。healthのSELECT 1は通常0 rows_readのmetadataでも**D1 query 1回**と通信/処理を消費する。
 
-### `classifySearchCost(input)` の一般則
+### `classifySearchCost(input)` の一般則（現行）
 
 - `protectSearch()`を通るPOSTまたはcache非対象/使用不能 → **uncached**（expensiveと同じ20/60 tier）。Dynamic Facetはこのclassifierを通らず専用30/60 tier。
-- keywordなしcategory listing → **expensive**。
+- cache eligible GETで前述のcanonical初期category listing → **bootstrap**（専用40/60 tier）。Filter metadata MISSも`protectBootstrap()`を直接通る。
+- 上記以外でkeywordなし → **expensive**（cache非対象なら先にuncached判定）。
 - 既存`parseSearchIntent()`の`specOnly` / `family` / `identity` → **expensive**。
 - 残余tokensに3〜5桁数字と短い英数字affixによるmodel-like tokenがある → **normal**。
 - その他のgeneric/manufacturer/自然言語 → **expensive**。
@@ -176,7 +215,7 @@ identifierやfilterの存在だけでcheapと信用しない。POSTは常にunca
 familyが安価なCPU例を含んでも保守的にexpensiveへ送る。
 
 今回11件＋保存済み同snapshot remote Golden 120件の計131件に対し、説明用のactual expensive境界を**5,000 rows/query**とした。
-cheapの目安は100行未満、mediumは100〜4,999行。runtimeのclassはnormal/expensive/uncachedであり、cheap枠の無制限許可は設けない。
+cheapの目安は100行未満、mediumは100〜4,999行。以下の導入時集計はnormal/expensive/uncached。現行runtimeにはresource classとしてbootstrapを追加したが、cheap枠の無制限許可は設けない。bootstrapも低read量の保証ではない。
 保存済みGoldenのrowsはbenchmark自身のlimit/scan条件で、WorkerのLIMIT21＋OFFSETとは区別して記録した。
 
 |predicted|件数|actual rows p50 / p95 / max|
@@ -197,6 +236,7 @@ cheapの目安は100行未満、mediumは100〜4,999行。runtimeのclassはnorm
 |全MISS 60/60秒|既存mixed 100件には36 MISS。全件を同一window内に置いたoffline replayでも429=0、24件の追加admission余裕。normal query実測は概ね数十〜千行台だが、model-like abuseにも有限budgetを置く|
 |expensive/uncached 20/60秒|同mixedのrestricted MISSは13件。20は約1.54倍の余裕。通常の数回のadvanced POSTやpage送りを許容しつつ、broad/POST/深いpaginationを同じresource予算で囲う。実ユーザーtraffic未観測のため初期値|
 |Facet 30/60秒|フィルター操作のFacet呼出しを通常Searchと別budgetにするための初期threshold。production telemetryを見て調整可能。D1全体の60/60秒は引き続き共通|
+|Bootstrap 40/60秒|boundedなcacheable UI初期readを任意unique Searchから隔離する専用budget。refill 2/10秒で同keyの重複消費を抑え、共通D1 60/60秒を最終admission上限として維持|
 |query refill 2/10秒|1回のrefillが通常100〜数百ms、TTL=300秒。1件だけよりretry/失敗への余裕を取り、10連打のうち少数だけを許可する狙い。eventual consistencyによる初期burstの弱点は後述|
 |health 60/60秒|1分に数回のmonitor＋運用確認に余裕を持たせる。1秒あたり1 probe相当のresource枠。search予算を減らさず安価なconnectivity probeを維持|
 
@@ -222,7 +262,7 @@ Access-Control-Allow-Origin: *
 }
 ```
 
-refill / in-flight拒否は`Retry-After: 10`、global/expensive/facet/healthは`60`。Facetはrefillを使わず、公開429 messageも既存の`Too many search requests`を維持。
+refill / in-flight拒否は`Retry-After: 10`、global/expensive/bootstrap/facet/healthは`60`。Facetはrefillを使わず、公開429 messageも既存の`Too many search requests`を維持。
 healthのmessageは`Too many health requests`。正確なreset時刻ではなく**再試行までの保守的な推奨秒数**であり、
 その後の成功を保証しない。clientはRetry-After後にjitter付きで再試行し、連打しない。
 `Retry-After`はCORS exposeする。新しいrate/remaining/debug headerは設けない。
@@ -323,7 +363,7 @@ fakeのexact countをeventualなproductionへ外挿しない。
 
 安価な`POST /v1/search`（cpu / 14900k）を**最大24件、300ms間隔**で送る。成功には少なくとも1件の**`expensive_miss`による429**と、全観測応答の契約正常が必要。colo-local / eventually consistentなproduction bindingと別trafficのwindow状態のため「20件成功・21件目拒否」はassertしない。Facetのproduction burstは行わない。
 
-他のSearch/Facet trafficが共通D1 budgetを消費していると、expensive limiter通過後に`d1_miss`で拒否され得る。これは正常な保護動作として契約全体を検証し、**最初の`d1_miss` 429で送信を終了**する。後段拒否で前段tokenをrefundできないため、Search専用拒否を出す目的で送信を続けない。window待ち・自動再試行・request追加は行わない。
+他のSearch/Bootstrap/Facet trafficが共通D1 budgetを消費していると、expensive limiter通過後に`d1_miss`で拒否され得る。これは正常な保護動作として契約全体を検証し、**最初の`d1_miss` 429で送信を終了**する。後段拒否で前段tokenをrefundできないため、Search専用拒否を出す目的で送信を続けない。window待ち・自動再試行・request追加は行わない。
 
 |観測結果|`contract` / exit code|解釈|
 |---|---|---|
@@ -337,7 +377,7 @@ cost分布に固定の合否thresholdは置かない。未完了でもsummaryを
 
 `scripts/lib/rate-smoke.js`の同じ判定・送信ループを`test/rate-smoke.test.js`からoffline実行し、共通D1拒否時の追加送信0、専用拒否未観測時の非ゼロ結果、専用→共通の混在、24件上限とpace、不正な429の早期終了前検証を確認する。
 
-exactなSearch 20件→21件目拒否、Facet 30件→31件目拒否、共通D1 60件→61件目拒否とbudget分離は`test/search-protection.test.js`のdeterministic fake limiterで確認する。production smokeは実Cloudflare環境で契約が機能することを確認する役割に限定する。
+exactなSearch 20件→21件目拒否、Bootstrap 40件→41件目拒否、Facet 30件→31件目拒否、共通D1 60件→61件目拒否とbudget分離は`test/search-protection.test.js`のdeterministic fake limiterで確認する。production smokeは実Cloudflare環境で契約が機能することを確認する役割に限定する。
 
 2026-09-23のcontract smoke更新後の実行は**24件中200=21、429=3**で成功。全24件のclassは`expensive_miss`、429全件でD1 queries / rows_read / rows_written=0を確認した。HTTP p50/p95/maxは108.80/140.83/160.27ms、CPUは1/2/5ms。allowed readsのmin/p50/maxは29/29/29、合計609 reads。これらは今回の観測値であり次回の固定期待値にはしない。`npm run check`（schema＋233 tests、skip 0）、`npm run verify:protection`（17 tests）、scriptの`node --check`、`git diff --check`も成功。
 
@@ -362,12 +402,13 @@ rows_readが0でもHTTP/Worker/D1 queryの資源は消費するためhealth専�
 |field|値|
 |---|---|
 |`rate_limit_status`|`not_checked` / `allowed` / `denied` / `unavailable`|
-|`rate_limit_class`|`none` / `query_inflight` / `query_refill` / `expensive_miss` / `facet_miss` / `d1_miss` / `health`|
-|`search_cost_class`|`not_classified` / `normal` / `expensive` / `uncached`|
+|`rate_limit_class`|`none` / `query_inflight` / `query_refill` / `expensive_miss` / `bootstrap_miss` / `facet_miss` / `d1_miss` / `health`|
+|`search_cost_class`|`not_classified` / `normal` / `expensive` / `uncached` / `bootstrap`|
 
 `cache_status`, `d1_queries`, `rows_read`, `rows_written`, `sql_duration_ms`, `elapsed_ms`は継続。
 HITは`not_checked`・`not_classified`・D1=0。拒否時の`rate_limit_class`は止めたlayer、allowed時は通過した最終resource tierの概要。
 Facet許可・専用拒否は`facet_miss`、共通D1拒否は`d1_miss`。Facetの`search_cost_class`は引き続き`uncached`。binding障害の`unavailable`も失敗したlayerを記録します。
+Bootstrap許可・専用拒否は`bootstrap_miss`、共通D1拒否は`d1_miss`。`search_cost_class=bootstrap`はrefill拒否でも維持し、HITは従来どおり未分類です。`evaluate-search-cost.js`の集計にもbootstrapを含めます。
 429では既存error契約に従い`cache_status=BYPASS`。cache対象だったかの診断にはcost classと拒否layerも使う。
 Worker CPUはJSからelapsedと混同して生成せず、**tail runtimeのcpuTime**をrequest IDで照合する。
 IP、keyword、URL全文、SQL、filters、token、hash keyをstructured logへ追加しない。

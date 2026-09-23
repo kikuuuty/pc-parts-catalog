@@ -8,7 +8,7 @@ const samples=quality.results.map(r=>({id:r.id,intent:r.intent,source:'local D1 
   predicted:classifySearchCost({...r.search,category:r.category,...(r.query?{keyword:r.query}:{})},{method:r.search?'POST':'GET'}),rows_read:r.rows_read}));
 if(!samples.every(s=>Number.isFinite(s.rows_read)))throw new Error('Missing measured D1 cost');
 const report={generated_at:new Date().toISOString(),fixture_sha256:quality.fixture_sha256,expensive_boundary_rows:5000,samples,
-  classes:Object.fromEntries(['normal','expensive','uncached'].map(c=>[c,distribution(samples.filter(s=>s.predicted===c).map(s=>s.rows_read))])),
+  classes:Object.fromEntries(['normal','expensive','uncached','bootstrap'].map(c=>[c,distribution(samples.filter(s=>s.predicted===c).map(s=>s.rows_read))])),
   false_negatives:samples.filter(s=>s.rows_read>=5000&&s.predicted==='normal'),
   conservative:samples.filter(s=>s.rows_read<5000&&s.predicted!=='normal').length};
 await writeFile('.cache/rate-classifier.json',JSON.stringify(report,null,2)+'\n');

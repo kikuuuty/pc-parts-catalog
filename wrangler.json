@@ -11,7 +11,8 @@
     { "name": "D1_MISS_LIMITER", "namespace_id": "29599002", "simple": { "limit": 60, "period": 60 } },
     { "name": "EXPENSIVE_MISS_LIMITER", "namespace_id": "29599003", "simple": { "limit": 20, "period": 60 } },
     { "name": "HEALTH_LIMITER", "namespace_id": "29599004", "simple": { "limit": 60, "period": 60 } },
-    { "name": "FACET_MISS_LIMITER", "namespace_id": "29599005", "simple": { "limit": 30, "period": 60 } }
+    { "name": "FACET_MISS_LIMITER", "namespace_id": "29599005", "simple": { "limit": 30, "period": 60 } },
+    { "name": "BOOTSTRAP_MISS_LIMITER", "namespace_id": "29599006", "simple": { "limit": 40, "period": 60 } }
   ],
   "vars": {
     "CATALOG_CACHE_EPOCH": "sync-dc3cb03f-3361-4bb4-a5c6-3584260cdb79-fts8-cache3",
@@ -36,7 +37,8 @@
         { "name": "D1_MISS_LIMITER", "namespace_id": "29599102", "simple": { "limit": 60, "period": 60 } },
         { "name": "EXPENSIVE_MISS_LIMITER", "namespace_id": "29599103", "simple": { "limit": 20, "period": 60 } },
         { "name": "HEALTH_LIMITER", "namespace_id": "29599104", "simple": { "limit": 60, "period": 60 } },
-        { "name": "FACET_MISS_LIMITER", "namespace_id": "29599105", "simple": { "limit": 30, "period": 60 } }
+        { "name": "FACET_MISS_LIMITER", "namespace_id": "29599105", "simple": { "limit": 30, "period": 60 } },
+        { "name": "BOOTSTRAP_MISS_LIMITER", "namespace_id": "29599106", "simple": { "limit": 40, "period": 60 } }
       ],
       "vars": {
         "CATALOG_CACHE_EPOCH": "local-fts8-cache3",

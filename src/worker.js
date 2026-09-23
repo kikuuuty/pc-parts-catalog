@@ -1,7 +1,7 @@
 import { categories, models } from './model.js';
 import { searchQuery } from './queries.js';
 import { searchCachePolicy, searchCacheKey, readSearchCache, writeSearchCache } from './search-cache.js';
-import { protectSearch, protectFacet, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
+import { protectSearch, protectBootstrap, protectFacet, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
 import { loadProductDetail, productDetailCache } from './product-detail.js';
 import { searchWindow, cursorContext, decodeCursor, encodeCursor } from './pagination.js';
 import { validateReferences, resolveProducts } from './product-reference.js';
@@ -235,7 +235,9 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
               } catch { event.cache_status = 'BYPASS'; event.cache_error = 'match'; }
             }
             if (cachedBody === undefined) {
-              const release = await protectSearch(env, event, { category }, 'GET', key, refillGuard);
+              const release = key && !event.cache_error
+                ? await protectBootstrap(env, event, key, refillGuard)
+                : await protectSearch(env, event, { category }, 'GET', key, refillGuard);
               try {
                 payload = await loadFilterMetadata(executeBatch, category);
                 if (key) {

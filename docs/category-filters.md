@@ -117,8 +117,22 @@ startup validationは全カテゴリの登録、field/facetの存在、targetと
 - 内部Cache API key: `/__catalog_cache/filters/v1/<category>?epoch=<CATALOG_CACHE_EPOCH>`。search/detail namespaceとは独立し、API変更時はfilter versionを更新します。
 - TTLは600秒。epoch不正・未設定時は内部cacheをBYPASS。catalog releaseのepoch変更により旧metadataは再利用しません。
 - ブラウザ向け`Cache-Control: public, max-age=0, must-revalidate`。固定URLにepochがないため、ブラウザ・通常のHTTP shared cacheは毎回再検証し、古いreleaseを独自TTLで保持しません。内部のepoch付きcacheがD1アクセスを抑制します。
-- `X-Cache` / `X-Cache-TTL` / `Age`は既存utilityと同じです。HITはD1 query/operationゼロ。MISSは既存expensive/all-MISS limiterとrefill guardを通ります。
-- cache障害時はDBへフォールバックします。エラーは`no-store`、DBエラーは既存の秘匿化と503/500契約を維持します。
+- `X-Cache` / `X-Cache-TTL` / `Age`は既存utilityと同じです。HITは全limiter token・D1 query/operation/read/writeゼロ。MISSは`protectBootstrap()`でin-flight guard → `QUERY_REFILL_LIMITER` (2/10秒、canonical keyのSHA-256) → `BOOTSTRAP_MISS_LIMITER` (40/60秒) → `D1_MISS_LIMITER` (60/60秒)を通ります。Searchの20/60秒とFacetの30/60秒は消費しません。
+- bootstrap許可・専用拒否は`rate_limit_class=bootstrap_miss`、`search_cost_class=bootstrap`。共通D1拒否は`d1_miss`です。専用tierを先に判定するため専用拒否でD1 tokenを消費しません。後段D1拒否で前段tokenを返却することはできません。
+- bootstrap 429も既存の`RATE_LIMITED` / `Too many search requests`、`no-store`、`X-Cache: BYPASS`、`Retry-After: 60`、CORS `*`を維持し、D1 query/read/writeはゼロです。refill / in-flight拒否のRetry-Afterは10秒です。
+- cache障害・epoch不正・Cache APIなしでは既存の`uncached` → expensive 20/60秒 → D1 60/60秒で保護してDBへフォールバックします（keyがあるlookup障害ではrefillも適用）。エラーは`no-store`、DBエラーは既存の秘匿化と503/500契約、binding障害はfail closedを維持します。
+
+この分離は、**bounded-cardinalityかつcacheableなUI bootstrap trafficを、任意にunique queryを生成できるexpensive Searchからresource isolationするため**のものです。metadataはcategory allowlistとquery parameter禁止により各カテゴリ1つのcanonical keyに限定されます。
+同じresource classに入る検索は、GET・keyword/cursor/追加条件なし・limit=20（省略可）・offset=0（省略可）・cache eligibleの初期category listingだけです。keyword、POST、cursor、非標準pagination、Product Detail/resolveはbootstrapに含みません。
+
+```text
+Bootstrap → QUERY_REFILL 2/10 → BOOTSTRAP 40/60 → D1 60/60
+Expensive Search → EXPENSIVE 20/60 → D1 60/60
+Dynamic Facet → FACET 30/60 → D1 60/60
+```
+
+Searchにもcache keyがあれば既存refillを適用します。全classの共通D1 budgetを維持し、metadataのread量が安価であるとは仮定しません。
+exactな40→41はdeterministic testで検証します。productionでthresholdまでmetadataをcold取得するsmokeは行わず、確認する場合も1〜数requestの許可telemetryとMISS→HIT（HITのD1=0）に限定します。
 
 ## Query costと検証
 
