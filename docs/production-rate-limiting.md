@@ -22,10 +22,10 @@ threshold変更は`protectionBindings`・Wrangler production/localを同時に�
 - deterministic fake limiter: Facet 30件200、31件目429 / `facet_miss` / D1=0 / D1 token追加消費0。20 Search＋20 Facetは全件200。normal検索も合算したD1上限で`d1_miss`、後段拒否時のFacet token返却なしを確認。
 - `worker-predeploy.js`: remote readiness成功。`check-rate-namespaces.js`: 現account 1 Worker、新Facetを含むproduction 5 namespacesの衝突0。production/local全10 namespacesの一意性は自動テストで確認。Wrangler dry-runで5 bindingsを確認。
 - `npm run lint`はscript未定義。tracked JavaScriptの`node --check`と`git diff --check`は成功。
-- 既存`verify-rate-smoke.js`は最初の200応答で`rows_read`の固定期待値49と実測29が不一致となり停止。429 probe完了とは扱わない。
+- 分離実装時の`verify-rate-smoke.js`は最初の200応答で`rows_read`の固定期待値49と実測29が不一致となり停止。そのrunは429 probe完了とは扱わない。後述のcontract smoke更新で固定値依存を解消。
 - `verify:worker:local`の拡張API smokeは検証snapshot `992dacfa…`とlocal D1 `eec0df17…`の不一致でHTTP検証前に停止。別途、local Workerに対する既存`verify-api.js --url http://127.0.0.1:8789 --paced --rounds 2`は11検索×2回＋advanced POSTのHTTP/direct-D1照合に成功（`.cache/api-facet-rate-basic.json`）。拡張smokeの成功を代替するものではない。
 
-deploy前にはrate smokeのread期待値と検証snapshotの整合を確認し、両検証を再実行する。新Facet bindingのproduction動作・telemetryはdeploy後に確認する。
+deploy前にはcontract smokeと、検証snapshotの整合を取った拡張API smokeを実行する。新Facet bindingのproduction動作・telemetryはdeploy後に確認する。
 
 ## 結果と到達範囲
 
@@ -313,7 +313,23 @@ mixedは各カテゴリ内でも全keywordが異なり、paginationは合法120�
 normal-shaped caseの実SQLが35,963行読むと実測したわけではなく、classifierをすり抜けた高costへのglobal保護を評価するための仮定。
 fakeのexact countをeventualなproductionへ外挿しない。
 
-### 小規模production POST 429 probe
+### Production Rate Limiting contract smoke
+
+`node scripts/verify-rate-smoke.js`はSearchの200/429保護契約とD1 pre-admission protectionを確認する。固定のSQL read量・query数・検索結果件数は検証せず、検索品質・結果一致・コスト評価は既存benchmark / API verificationに任せる。
+
+- 共通: HTTP 200または429、`Cache-Control: no-store`、`X-Cache: BYPASS`、`X-Request-ID`、telemetry `rate_limit_class=expensive_miss`。
+- 200: `rate_limit_status=allowed`、有限の`d1_queries > 0`、有限で非負の`rows_read`。query分割やcatalog更新によるread量変化を許容する。
+- 429: `Retry-After: 60`、CORS `*`と`Retry-After`のexpose、既存の`RATE_LIMITED` / `Too many search requests`、body/headerのrequest ID一致。`rate_limit_status=denied`、**`d1_queries=0`・`rows_read=0`・`rows_written=0`**でD1実行前の拒否を確認する。
+
+安価な`POST /v1/search`（cpu / 14900k）を**最大24件、300ms間隔**で送る。少なくとも1件の429が必要だが、colo-local / eventually consistentなproduction bindingと別trafficのwindow状態のため「20件成功・21件目拒否」はassertしない。429未観測なら失敗としてdeployment/configurationを確認し、その場でrequest数を増やさない。Facetのproduction burstは行わない。
+
+stdoutには総request数、200/429件数、HTTP latency・CPU分布、allowed/limited samples、allowed readsのmin/p50/p95/max、観測class別件数を出力する。これらのcost分布に固定の合否thresholdは置かない。429が未観測でもsummaryを出してから失敗し、全sampleは従来どおり`.cache/rate-production-429.json`へ保存、tailはfinallyで停止する。
+
+exactなSearch 20件→21件目拒否、Facet 30件→31件目拒否、共通D1 60件→61件目拒否とbudget分離は`test/search-protection.test.js`のdeterministic fake limiterで確認する。production smokeは実Cloudflare環境で契約が機能することを確認する役割に限定する。
+
+2026-09-23のcontract smoke更新後の実行は**24件中200=21、429=3**で成功。全24件のclassは`expensive_miss`、429全件でD1 queries / rows_read / rows_written=0を確認した。HTTP p50/p95/maxは108.80/140.83/160.27ms、CPUは1/2/5ms。allowed readsのmin/p50/maxは29/29/29、合計609 reads。これらは今回の観測値であり次回の固定期待値にはしない。`npm run check`（schema＋233 tests、skip 0）、`npm run verify:protection`（17 tests）、scriptの`node --check`、`git diff --check`も成功。
+
+### 小規模production POST 429 probe（2026-09-13の実測）
 
 `14900k`のPOSTを最大24件、各応答後300ms待って送信。全件通過しても1,176行程度のread。
 **21 D1 / 3×429 / 1,029 reads**、HTTP p50/p95/max=107.64/120.35/123.82ms、CPU=1/2/2ms。

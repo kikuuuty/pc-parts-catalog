@@ -130,7 +130,12 @@ test('20 advanced Searches plus 20 facets have independent budgets and share the
   }
   assert.deepEqual(calls(h), { QUERY_REFILL_LIMITER: 0, D1_MISS_LIMITER: 40, EXPENSIVE_MISS_LIMITER: 20, HEALTH_LIMITER: 0, FACET_MISS_LIMITER: 20 });
   assert.equal((await search()).status, 429);
+  assert.equal(h.logs.at(-1).rate_limit_status, 'denied');
   assert.equal(h.logs.at(-1).rate_limit_class, 'expensive_miss');
+  assert.equal(h.logs.at(-1).d1_queries, 0);
+  assert.equal(h.logs.at(-1).rows_read, 0);
+  assert.equal(h.logs.at(-1).rows_written, 0);
+  assert.equal(h.statements.length, 40);
   assert.equal(h.env.D1_MISS_LIMITER.calls.length, 40);
   for (let i = 0; i < 11; i++) assert.equal((await h.request({ category: 'cpu', keyword: `model${1000 + i}` })).status, 200);
   for (let i = 0; i < 9; i++) assert.equal((await facet(h)).status, 200);
