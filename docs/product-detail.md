@@ -65,9 +65,11 @@ contract. Clients wanting canonical grouped identifiers should use Detail.
 
 Detail does not select a universal `price_search_code`. The first implemented
 Provider is [Yahoo!ショッピング Offers](product-offers.md): after selection, call
-`GET /v1/products/:id/offers`. It selects one supported canonical JAN and requires
-an exact JAN match in Yahoo's response. No supported JAN gives a successful empty
-Offer response without external lookup. MPN/name fallback is not implemented.
+`GET /v1/products/:id/offers`. It prioritizes supported canonical JAN, then falls
+back to supported canonical EAN-13 only if no JAN can be selected. Both require
+an exact string match in Yahoo's `janCode`; canonical identifier types remain
+unchanged. Neither available gives an empty unsupported Offer response without
+external lookup. MPN/name fallback is not implemented.
 Future Providers can choose their own regional lookup and disambiguation rules.
 
 ## IDs, performance and cache

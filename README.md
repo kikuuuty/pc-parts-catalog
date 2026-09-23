@@ -9,7 +9,7 @@ category → category registry → category-specific FTS → candidate retrieval
   → typed filters / facets / ranges → stable display ordering
   → cursor pagination (keywordはbounded OFFSET) → frontend selection
   → GET /v1/products/:id → canonical identifiers
-  → GET /v1/products/:id/offers → JAN exact lookup → Yahoo!ショッピング Offer
+  → GET /v1/products/:id/offers → JAN優先 / EAN-13 fallback exact lookup → Yahoo!ショッピング Offer
 
 saved/shared build → source + upstream_key
   → POST /v1/products/resolve → current product ID/status
@@ -62,7 +62,7 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 |`GET /v1/search?category=cpu&q=9800X3D`|簡易検索|
 |`POST /v1/search`|keyword、typed filters、ranges、facets、identifier、orderBy|
 |`GET /v1/products/:id`|選択した製品の詳細とcanonical identifiers|
-|`GET /v1/products/:id/offers`|canonical JAN一致のYahoo!ショッピング販売候補（価格昇順、最大50件）|
+|`GET /v1/products/:id/offers`|canonical JAN優先／EAN-13 fallback完全一致のYahoo販売候補（価格昇順、最大50件）|
 |`POST /v1/products/resolve`|最大64 stable refsを現在のIDとactive/inactive/missingへ一括解決|
 
 検索にはcategoryが必須です。通常候補一覧にはidentifierを付けません。必要なクライアントは既存の`include: ["identifiers", "facets"]`も使用できます。
@@ -88,12 +88,17 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 - keyword GET検索は標準20件・先頭6ページだけedge cache。cursor・POST・resolveはBYPASS。ブラウザ向けは`no-store`、CORS `*`。
 - 詳細なHTTP契約は[API文書](docs/cloudflare-production.md)、Product Detailは[詳細API文書](docs/product-detail.md)。
 
-Yahoo!ショッピングProviderは`jan`のexact lookupのみを使用します。安全なJANがない製品は外部検索せず
+Yahoo!ショッピングProviderはcanonical `jan`のexact lookupを最優先し、選択できるJANがない場合だけ
+安全なcanonical `ean`（EAN-13、region `jp`／`all`）へfallbackします。両方ない製品は外部検索せず
 `lookup.status=unsupported`と空の`offers`を返します。価格はYahoo表示価格、送料は区分だけを保持し、
 推定送料・PayPayポイント込み実質価格は計算しません。Offer cacheは既定30分、専用MISS予算は30回/60秒。
 `YAHOO_SHOPPING_APP_ID`はsecretとして設定します（local: `.dev.vars.local`）。
 API契約・照合／cache／保護の範囲・secret設定・任意の実API smokeは[Product Offers](docs/product-offers.md)を参照してください。
 MPN/name fallbackとYahoo以外のProviderは未実装です。
+どちらもYahooの`jan_code`へコード文字列を渡し、返却`janCode`の完全一致を必須とします。
+canonical DBのEANをJANへ変換・追加せず、UPC／GTIN-14／EAN-8からの変換も行いません。
+API／telemetry／cacheのstrategyは`jan`と`ean13_as_jan`を区別します。
+AMD Ryzen 7 9800X3D（確認時product ID 372）のEAN `0730143315289`が代表例です。
 
 カテゴリ別filter UIは`GET /v1/categories/:category/filters`の`control`・`target`・`value_type`・`options` / `range`から構築できます。
 メーカーを含むcurated定義をbackendで管理し、選択値を`POST /v1/search`の`filters` / `ranges` / `facets`へ送ります。

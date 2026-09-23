@@ -45,8 +45,9 @@ export function normalizeYahooOffers(body, jan, fetchedAt) {
   const offers = [];
   for (const hit of body.hits) {
     if (!object(hit)) throw new OfferProviderError('malformed_response');
-    // Missing JAN is also unverified. Never manufacture an exact match from the query.
-    if (typeof hit.janCode !== 'string' || hit.janCode.trim() !== jan) continue;
+    // jan is the exact lookup value, regardless of its canonical catalog type.
+    // Missing or altered codes are unverified; do not repair upstream values.
+    if (typeof hit.janCode !== 'string' || hit.janCode !== jan) continue;
     if (hit.inStock === false || hit.condition === 'used') continue;
     if (!text(hit.code) || !text(hit.name) || !safeUrl(hit.url) ||
         !Number.isSafeInteger(hit.price) || hit.price <= 0 || hit.inStock !== true || hit.condition !== 'new' ||
@@ -57,7 +58,7 @@ export function normalizeYahooOffers(body, jan, fetchedAt) {
     /** @type {import('./model.js').SellerImage} */
     const sellerImage = { id: text(seller.imageId) ? seller.imageId : null, url: null };
     offers.push({
-      provider: 'yahoo', provider_item_id: hit.code, name: hit.name, jan_code: hit.janCode.trim(),
+      provider: 'yahoo', provider_item_id: hit.code, name: hit.name, jan_code: hit.janCode,
       image: yahooImage(hit),
       seller: { id: seller.sellerId, name: seller.name, url: safeUrl(seller.url),
         image: sellerImage,
@@ -103,8 +104,9 @@ export async function fetchYahooOffers({ appId, jan, fetch: fetcher = globalThis
   });
   try {
     return await Promise.race([timeout, (async () => {
-      // No redirects or automatic retries: neither credentials nor MISS budget can escape.
-      const response = await fetcher(url, { signal: controller.signal, redirect: 'error' });
+      // workerd supports manual/follow, not error. Reject 3xx below without following
+      // Location: neither credentials nor MISS budget can escape via redirects/retries.
+      const response = await fetcher(url, { signal: controller.signal, redirect: 'manual' });
       event.upstream_status_class = `${Math.floor(response.status / 100)}xx`;
       if (!response.ok) {
         void response.body?.cancel().catch(() => {});

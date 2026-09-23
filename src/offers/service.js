@@ -1,4 +1,4 @@
-import { selectJan } from './identifiers.js';
+import { selectYahooLookup } from './identifiers.js';
 import { fetchYahooOffers } from './yahoo-shopping.js';
 import { offerCachePolicy } from './cache.js';
 import { readSearchCache, writeSearchCache } from '../search-cache.js';
@@ -11,14 +11,14 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs }
   let nextCallAt = 0;
   let admitting = false;
   return async function loadOffers({ product, url, env, cache, event, headers }) {
-    const jan = selectJan(product.identifiers);
-    Object.assign(event, { provider: 'yahoo', lookup_strategy: jan ? 'jan' : null, offer_cache_status: 'BYPASS' });
+    const lookup = selectYahooLookup(product.identifiers);
+    Object.assign(event, { provider: 'yahoo', lookup_strategy: lookup?.strategy ?? null, offer_cache_status: 'BYPASS' });
     const base = { product: { id: product.id, name: product.name }, provider: 'yahoo' };
-    if (!jan) {
+    if (!lookup) {
       event.offer_count = 0;
       return { ...base, lookup: { status: 'unsupported', strategy: null, reason: 'no_supported_identifier' }, offers: [] };
     }
-    const policy = offerCachePolicy(url, jan, env);
+    const policy = offerCachePolicy(url, lookup, env);
     const key = policy.key.url;
     let task = inflight.get(key);
     const coalesced = !!task;
@@ -55,7 +55,7 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs }
           if (!(error instanceof ProtectionError)) throw error;
           throw error.status === 429 ? rateLimited('miss_budget', error.retryAfter) : unavailable('protection');
         } finally { admitting = false; }
-        const offers = await fetchYahooOffers({ appId: env.YAHOO_SHOPPING_APP_ID, jan, fetch: fetcher, now, timeoutMs, event: metrics });
+        const offers = await fetchYahooOffers({ appId: env.YAHOO_SHOPPING_APP_ID, jan: lookup.value, fetch: fetcher, now, timeoutMs, event: metrics });
         if (useCache) {
           try { await writeSearchCache(cache, policy.key, JSON.stringify(offers), policy.ttl, now()); }
           catch { metrics.offer_cache_status = 'BYPASS'; metrics.offer_cache_error = 'put'; }
@@ -69,7 +69,7 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs }
       if (policy.eligible && cache) headers.set('X-Cache-TTL', String(policy.ttl));
       if (age !== undefined) headers.set('Age', String(age));
       event.offer_count = offers.length;
-      return { ...base, lookup: { status: 'complete', strategy: 'jan', reason: null }, offers };
+      return { ...base, lookup: { status: 'complete', strategy: lookup.strategy, reason: null }, offers };
     } finally {
       Object.assign(event, task.metrics, { offer_coalesced: coalesced });
       if (inflight.get(key) === task) inflight.delete(key);

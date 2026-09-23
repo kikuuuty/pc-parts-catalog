@@ -69,7 +69,7 @@ test('Yahoo transport uses URL encoding, required filters, timeout signal, no re
     assert.equal(url.origin + url.pathname, 'https://shopping.yahooapis.jp/ShoppingWebService/V3/itemSearch');
     assert.deepEqual(Object.fromEntries(url.searchParams), { appid: appId, jan_code: JAN, results: '50', in_stock: 'true', condition: 'new', sort: '+price', image_size: '300' });
     assert.match(url.search, /sort=%2Bprice/);
-    assert.equal(init.redirect, 'error'); assert(init.signal instanceof AbortSignal);
+    assert.equal(init.redirect, 'manual'); assert(init.signal instanceof AbortSignal);
     return Response.json(yahooBody([yahooHit()]));
   } });
   assert.equal(offers[0].fetched_at, '1970-01-01T00:00:00.000Z');
@@ -150,6 +150,19 @@ test('transport classifies missing secret, HTTP failures, invalid JSON, malforme
   await assert.rejects(fetchYahooOffers({ appId: 'test', jan: JAN, fetch: async () => new Response('{') }), { reason: 'invalid_json' });
   await assert.rejects(fetchYahooOffers({ appId: 'test', jan: JAN, fetch: async () => Response.json({}) }), { reason: 'malformed_response' });
   await assert.rejects(fetchYahooOffers({ appId: 'test', jan: JAN, fetch: async () => { throw Error('secret URL'); } }), { reason: 'network' });
+});
+
+test('Yahoo redirects are rejected without following Location or exposing it, using workerd-compatible manual mode', async () => {
+  let calls = 0;
+  for (const status of [301, 302, 307, 308]) {
+    await assert.rejects(fetchYahooOffers({ appId: 'test-only-secret', jan: JAN, fetch: async (url, init) => {
+      calls++;
+      assert.equal(init.redirect, 'manual');
+      assert.equal(new URL(url).hostname, 'shopping.yahooapis.jp');
+      return new Response('', { status, headers: { Location: 'https://untrusted.example/redirect?appid=test-only-secret' } });
+    } }), error => error.reason === 'upstream_status' && error.status === 502 && !/https:|test-only-secret/.test(error.message));
+  }
+  assert.equal(calls, 4, 'one request per attempt; no automatic redirect/retry');
 });
 
 test('timeout covers both fetch and response body, even for a transport ignoring cancellation', async () => {

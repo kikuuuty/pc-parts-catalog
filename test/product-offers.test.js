@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { database } from '../test-support/database.js';
 import { fakeLimiters } from '../test-support/rate-limiter.js';
-import { yahooHit, yahooBody, JAN, OTHER_JAN } from '../test-support/yahoo.js';
+import { yahooHit, yahooBody, JAN, OTHER_JAN, RYZEN_EAN, ryzen9800 } from '../test-support/yahoo.js';
 import { normalize } from '../src/normalize.js';
 import { syncSnapshot } from '../src/sync.js';
 import { addLocalIdentifier } from '../src/enrichment.js';
@@ -16,7 +16,7 @@ import { writeSearchCache } from '../src/search-cache.js';
 async function setup(t, options = {}) {
   const db = database(); t.after(() => db.sqlite.close());
   await syncSnapshot(db, { commit: 'a'.repeat(40), records: Array.from({ length: 3 }, (_, i) => normalize('cpu', {
-    opendb_id: randomUUID(), metadata: { name: `Private product ${i}` },
+    opendb_id: randomUUID(), metadata: { name: `Private product ${i}` }, ...(i === 2 ? options.product : {}),
   }, 'a'.repeat(40))) });
   for (const productId of [1, 2]) await addLocalIdentifier(db, { productId, type: 'jan', value: ` ${JAN} `, evidence: 'test' });
   let clock = 1000000, fetches = 0;
@@ -58,14 +58,67 @@ test('offers contract, CORS, request IDs, MISS -> HIT and same JAN shared across
   assert(h.logs.every(e => e.route === '/v1/products/:id/offers'));
 });
 
-test('no supported JAN returns 200 unsupported without secret, limiter or upstream lookup', async t => {
+test('no supported JAN or EAN-13 returns 200 unsupported without secret, limiter or upstream lookup', async t => {
   const h = await setup(t); delete h.env.YAHOO_SHOPPING_APP_ID;
-  await addLocalIdentifier(h.db, { productId: 3, type: 'ean', value: JAN, evidence: 'test' });
+  await addLocalIdentifier(h.db, { productId: 3, type: 'ean', value: '00123457', evidence: 'test' });
   await addLocalIdentifier(h.db, { productId: 3, type: 'jan', value: 'bad code', evidence: 'test' });
   const response = await h.request('/v1/products/3/offers'); assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { product: { id: 3, name: 'Private product 2' }, provider: 'yahoo',
     lookup: { status: 'unsupported', strategy: null, reason: 'no_supported_identifier' }, offers: [] });
   assert.equal(h.fetches(), 0); assert.equal(h.env.YAHOO_OFFER_MISS_LIMITER.calls.length, 0);
+});
+
+test('9800X3D EAN fallback returns only exact Yahoo matches; cached images/fetched_at and telemetry remain safe', async t => {
+  const h = await setup(t, { product: ryzen9800, fetch: async input => {
+    const url = new URL(input);
+    assert.equal(url.searchParams.get('jan_code'), RYZEN_EAN);
+    assert.equal(url.searchParams.get('image_size'), '300');
+    return Response.json(yahooBody([
+      yahooHit({ janCode: RYZEN_EAN }),
+      ...[OTHER_JAN, undefined, '', 730143315289, '730143315289', '0730143315288', ` ${RYZEN_EAN} `]
+        .map(janCode => yahooHit({ janCode, name: ryzen9800.metadata.name, price: 1 })),
+    ]));
+  } });
+  const before = (await h.db.query('SELECT * FROM identifiers WHERE product_id=3')).results;
+  const response = await h.request('/v1/products/3/offers');
+  assert.equal(response.status, 200); assert.equal(response.headers.get('X-Cache'), 'MISS');
+  const body = await response.json();
+  assert.equal(body.product.name, 'AMD Ryzen 7 9800X3D');
+  assert.deepEqual(body.lookup, { status: 'complete', strategy: 'ean13_as_jan', reason: null });
+  assert.equal(body.offers.length, 1); assert.equal(body.offers[0].jan_code, RYZEN_EAN);
+  assert.equal(body.offers[0].image.preferred.width, 300);
+  assert.equal(body.offers[0].seller.image.id, 'example-seller-image');
+  assert(!Object.hasOwn(body.offers[0], 'ean_code'));
+  assert.equal(h.env.YAHOO_OFFER_MISS_LIMITER.calls.length, 1);
+  h.advance(5000);
+  const hit = await h.request('/v1/products/3/offers'); assert.equal(hit.headers.get('X-Cache'), 'HIT');
+  assert.deepEqual(await hit.json(), body, 'HIT must preserve fetched_at and all image/seller metadata');
+  assert.equal(h.fetches(), 1); assert.equal(h.env.YAHOO_OFFER_MISS_LIMITER.calls.length, 1);
+  assert(h.logs.every(e => e.lookup_strategy === 'ean13_as_jan'));
+  for (const value of [RYZEN_EAN, body.product.name, 'https://', h.env.YAHOO_SHOPPING_APP_ID]) assert(!JSON.stringify(h.logs).includes(value));
+  assert.deepEqual((await h.db.query('SELECT * FROM identifiers WHERE product_id=3')).results, before);
+});
+
+test('JAN overrides EAN in the endpoint; same-value EAN strategy cannot HIT a JAN cache entry', async t => {
+  const product = { ...ryzen9800, identifiers: { version: 1, identifiers: [{ type: 'ean', value: JAN, region: 'all' }] } };
+  const h = await setup(t, { product });
+  await addLocalIdentifier(h.db, { productId: 1, type: 'ean', value: RYZEN_EAN, evidence: 'test' });
+  const first = await h.request(); assert.equal((await first.json()).lookup.strategy, 'jan');
+  h.advance(1000);
+  const fallback = await h.request('/v1/products/3/offers');
+  assert.equal(fallback.headers.get('X-Cache'), 'MISS');
+  assert.equal((await fallback.json()).lookup.strategy, 'ean13_as_jan');
+  assert.equal(h.fetches(), 2); assert.equal(h.env.YAHOO_OFFER_MISS_LIMITER.calls.length, 2);
+});
+
+test('EAN mismatch-only results are empty complete Offers, not name/MPN fallback', async t => {
+  const h = await setup(t, { product: ryzen9800, fetch: async () => Response.json(yahooBody([
+    yahooHit({ janCode: OTHER_JAN, name: 'AMD Ryzen 7 9800X3D 100-100001084WOF' }),
+  ])) });
+  const response = await h.request('/v1/products/3/offers'); assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.deepEqual(body.lookup, { status: 'complete', strategy: 'ean13_as_jan', reason: null });
+  assert.deepEqual(body.offers, []);
 });
 
 test('image metadata is cached with Offers, old cache generation is ignored and image URLs are never fetched or logged', async t => {
@@ -75,7 +128,7 @@ test('image metadata is cached with Offers, old cache generation is ignored and 
     assert.equal(url.searchParams.get('image_size'), '300');
     return Response.json(yahooBody([yahooHit()]));
   } });
-  const policy = offerCachePolicy(new URL('https://catalog.example'), JAN, h.env);
+  const policy = offerCachePolicy(new URL('https://catalog.example'), { strategy: 'jan', value: JAN }, h.env);
   assert.equal(new URL(policy.key.url).pathname, '/__catalog_cache/offers/yahoo/v2');
   const legacyKey = new Request(policy.key.url.replace('/yahoo/v2?', '/yahoo/v1?'));
   await writeSearchCache(h.cache, legacyKey, JSON.stringify([{ price: 1 }]), policy.ttl, 1000000);
