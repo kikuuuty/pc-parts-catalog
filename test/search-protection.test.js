@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { classifySearchCost, protectionBindings, validateProtectionConfig, createRefillGuard } from '../src/search-protection.js';
+import { classifySearchCost, protectionBindings, yahooOfferBinding, validateProtectionConfig, createRefillGuard } from '../src/search-protection.js';
 import { protectionWorker } from '../test-support/protection-worker.js';
 import { categories } from '../src/model.js';
 import { cursorContext, encodeCursor } from '../src/pagination.js';
@@ -570,7 +570,7 @@ test('predeploy strictly validates all production/local bindings and unique name
     c => c.ratelimits[0].simple.period = 30, c => c.ratelimits[1].simple.limit = 600, c => delete c.vars.CATALOG_CACHE_EPOCH]) {
     const copy = structuredClone(config); mutate(copy); assert.throws(() => validateProtectionConfig(copy));
   }
-  for (const environment of ['production', 'local']) for (const binding of protectionBindings) {
+  for (const environment of ['production', 'local']) for (const binding of [...protectionBindings, yahooOfferBinding]) {
     for (const mutate of [c => c.ratelimits = c.ratelimits.filter(b => b.name !== binding.name),
       c => c.ratelimits.find(b => b.name === binding.name).namespace_id = '99999999',
       c => c.ratelimits.find(b => b.name === binding.name).namespace_id = c.ratelimits.find(b => b.name !== binding.name).namespace_id,
@@ -587,13 +587,13 @@ test('predeploy strictly validates all production/local bindings and unique name
   assert.throws(() => validateProtectionConfig(shared));
   const missingLocal = structuredClone(config); delete missingLocal.env.local.ratelimits;
   assert.throws(() => validateProtectionConfig(missingLocal));
-  assert.equal(config.ratelimits.length, 6);
-  assert.equal(config.env.local.ratelimits.length, 6);
-  assert.deepEqual(config.env.local.ratelimits.map(({ name, simple }) => ({ name, simple })), protectionBindings.map(({ name, simple }) => ({ name, simple })));
+  assert.equal(config.ratelimits.length, 7);
+  assert.equal(config.env.local.ratelimits.length, 7);
+  assert.deepEqual(config.env.local.ratelimits.map(({ name, simple }) => ({ name, simple })), [...protectionBindings, yahooOfferBinding].map(({ name, simple }) => ({ name, simple })));
   assert.equal(config.env.local.ratelimits.find(b => b.name === 'FACET_MISS_LIMITER').namespace_id, '29599105');
   assert.equal(config.env.local.ratelimits.find(b => b.name === 'BOOTSTRAP_MISS_LIMITER').namespace_id, '29599106');
   assert.deepEqual(config.ratelimits.find(b => b.name === 'BOOTSTRAP_MISS_LIMITER'), {
     name: 'BOOTSTRAP_MISS_LIMITER', namespace_id: '29599006', simple: { limit: 40, period: 60 },
   });
-  assert.equal(new Set([...config.ratelimits, ...config.env.local.ratelimits].map(b => b.namespace_id)).size, 12);
+  assert.equal(new Set([...config.ratelimits, ...config.env.local.ratelimits].map(b => b.namespace_id)).size, 14);
 });

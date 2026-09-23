@@ -63,12 +63,12 @@ canonical additions belong in `local_identifiers`.
 POST search's opt-in identifier expansion retains its existing provenance-row
 contract. Clients wanting canonical grouped identifiers should use Detail.
 
-No single `price_search_code` is selected by the backend. For example:
-
-1. Frontend selects a search result and requests its Detail.
-2. Provider A tries MPN → EAN → name fallback.
-3. Provider B tries EAN/UPC → MPN → name fallback.
-4. Providers decide regional availability, disambiguation and fallback behavior.
+Detail does not select a universal `price_search_code`. The first implemented
+Provider is [Yahoo!ショッピング Offers](product-offers.md): after selection, call
+`GET /v1/products/:id/offers`. It selects one supported canonical JAN and requires
+an exact JAN match in Yahoo's response. No supported JAN gives a successful empty
+Offer response without external lookup. MPN/name fallback is not implemented.
+Future Providers can choose their own regional lookup and disambiguation rules.
 
 ## IDs, performance and cache
 

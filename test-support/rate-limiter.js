@@ -1,8 +1,8 @@
-import { protectionBindings } from '../src/search-protection.js';
+import { protectionBindings, yahooOfferBinding } from '../src/search-protection.js';
 
 // Deterministic single-location model, NOT a simulation of Cloudflare consistency.
 export function fakeLimiters({ now = () => 0, limits = {}, unlimited = false } = {}) {
-  return Object.fromEntries(protectionBindings.map(({ name, simple }) => {
+  return Object.fromEntries([...protectionBindings, yahooOfferBinding].map(({ name, simple }) => {
     const counters = new Map();
     const calls = [];
     return [name, { calls, async limit({ key }) {

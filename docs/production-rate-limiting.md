@@ -1,5 +1,12 @@
 # Production D1 read protection — 2026-09-13
 
+## Yahoo Offer MISS保護（実装、production deploy前）
+
+`YAHOO_OFFER_MISS_LIMITER`をproduction `29599007` / local `29599107`、30/60秒で追加。
+既存のD1/Search/Facet/Bootstrap予算には変更ありません。現在は7 bindings × 2環境の14 namespacesを検証します。
+Offer HITはYahoo tokenを消費せず、同一isolateで同時MISS集約と1秒開始間隔を適用します。
+厳密な全世界共通rate capではありません。詳細は[Product Offers](product-offers.md#cacheと保護)。
+
 ## UI bootstrap resource分離（2026-09-23、実装・offline検証）
 
 **bounded-cardinalityかつcacheableなUI bootstrap trafficを、任意にunique queryを生成できるexpensive Searchからresource isolationします。** UI初期表示時のmetadataと初期一覧がSearchの20/60秒budgetを共有していたため、専用40/60秒へ分離します。Dynamic Facetの呼出し有無や、特定のカテゴリ数・開く順番に依存する特例ではありません。

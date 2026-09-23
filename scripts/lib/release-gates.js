@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { remoteDatabaseId } from '../../src/remote-config.js';
 import { validateProtectionConfig } from '../../src/search-protection.js';
+import { offerCacheTtl } from '../../src/offers/cache.js';
 import { CACHE_SCHEMA_GENERATION } from '../../src/search-cache.js';
 import { NORMALIZER_VERSION, categories, models } from '../../src/model.js';
 import { catalogState, assertCatalogState, loadQualityCatalog } from '../../src/quality/catalog.js';
@@ -20,6 +21,10 @@ export const FTS_GENERATION = 8;
 export function productionConfig(config, env = process.env) {
   remoteDatabaseId(config);
   validateProtectionConfig(config);
+  for (const vars of [config.vars, config.env?.local?.vars]) {
+    assert(offerCacheTtl(vars?.YAHOO_OFFERS_CACHE_TTL_SECONDS) !== null, 'Invalid Yahoo offer cache TTL');
+    assert(!Object.hasOwn(vars ?? {}, 'YAHOO_SHOPPING_APP_ID'), 'Yahoo App ID must be a secret binding');
+  }
   assert(!env.CLOUDFLARE_D1_DATABASE_ID || env.CLOUDFLARE_D1_DATABASE_ID === remoteDatabaseId(config), 'D1 override differs from production binding');
   assert(!env.CLOUDFLARE_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID === config.account_id, 'Account override differs from production');
   return config;

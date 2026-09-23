@@ -32,6 +32,9 @@ export const protectionBindings = [
   { name: 'BOOTSTRAP_MISS_LIMITER', namespace_id: '29599006', simple: { limit: 40, period: 60 } },
 ];
 
+// Separate upstream budget; never consumed by catalog search or Offer cache HITs.
+export const yahooOfferBinding = { name: 'YAHOO_OFFER_MISS_LIMITER', namespace_id: '29599007', simple: { limit: 30, period: 60 } };
+
 export const localProtectionBindings = protectionBindings.map(binding => ({
   ...binding, namespace_id: String(Number(binding.namespace_id) + 100),
 }));
@@ -46,7 +49,7 @@ export class ProtectionError extends Error {
 }
 
 async function check(env, event, name, key, tier) {
-  const { simple: { period } } = protectionBindings.find(b => b.name === name);
+  const { simple: { period } } = [...protectionBindings, yahooOfferBinding].find(b => b.name === name);
   let success;
   try {
     const result = await env[name].limit({ key });
@@ -138,12 +141,17 @@ export async function protectHealth(env, event) {
   Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: 'health' });
 }
 
+export async function protectYahooOfferMiss(env, event) {
+  await check(env, event, yahooOfferBinding.name, 'yahoo-offer-miss', 'yahoo_offer_miss');
+  Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: 'yahoo_offer_miss' });
+}
+
 // Predeploy must reject missing, shared, or silently loosened bindings in either environment.
 export function validateProtectionConfig(config) {
   const namespaces = new Set();
   for (const [environment, actualBindings, expectedBindings] of [
-    ['production', config.ratelimits, protectionBindings],
-    ['local', config.env?.local?.ratelimits, localProtectionBindings],
+    ['production', config.ratelimits, [...protectionBindings, yahooOfferBinding]],
+    ['local', config.env?.local?.ratelimits, [...localProtectionBindings, { ...yahooOfferBinding, namespace_id: '29599107' }]],
   ]) {
     if (!Array.isArray(actualBindings) || actualBindings.length !== expectedBindings.length) throw new Error(`Missing ${environment} rate limit bindings`);
     for (const expected of expectedBindings) {

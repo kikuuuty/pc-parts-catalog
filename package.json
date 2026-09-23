@@ -33,6 +33,7 @@
     "verify:filters:local": "node scripts/verify-filters.js",
     "verify:release:cross-snapshot": "node scripts/verify-cross-snapshot.js",
     "verify:protection": "node --test test/search-protection.test.js",
+    "smoke:yahoo": "node --env-file-if-exists=.dev.vars.local scripts/smoke-yahoo-offers.js",
     "schema:generate": "node scripts/generate-schema.js",
     "schema:check": "node scripts/generate-schema.js --check",
     "test": "node --test",

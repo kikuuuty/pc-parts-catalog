@@ -7,6 +7,8 @@ import { searchWindow, cursorContext, decodeCursor, encodeCursor } from './pagin
 import { validateReferences, resolveProducts } from './product-reference.js';
 import { loadFilterMetadata, filterMetadataCache, FilterOptionLimitError } from './filter-metadata.js';
 import { dynamicFacetQueries, loadDynamicFacets } from './dynamic-facets.js';
+import { createOfferService } from './offers/service.js';
+import { OfferProviderError } from './offers/errors.js';
 
 const MAX_BODY = 16 * 1024;
 const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'], '/v1/products/resolve':['POST'] };
@@ -127,8 +129,10 @@ async function searchInput(request, url) {
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
 // No CLI, REST credentials, writes, SQL logging, or user-controlled SQL here.
-export function createWorker({ log = entry => console.log(JSON.stringify(entry)), cache: injectedCache, now = Date.now } = {}) {
+export function createWorker({ log = entry => console.log(JSON.stringify(entry)), cache: injectedCache, now = Date.now,
+  offerFetch, offerTimeoutMs } = {}) {
   const refillGuard = createRefillGuard();
+  const loadOffers = createOfferService({ fetch: offerFetch, now, timeoutMs: offerTimeoutMs });
   return {
     async fetch(request, env) {
       const started = performance.now();
@@ -186,11 +190,12 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         if (request.url.length > 4096) invalid('URL is too long');
         const url = new URL(request.url);
         const detailMatch = /^\/v1\/products\/([1-9]\d*)$/.exec(url.pathname);
+        const offerMatch = /^\/v1\/products\/([1-9]\d*)\/offers$/.exec(url.pathname);
         const filterMatch = /^\/v1\/categories\/([^/]+)\/filters$/.exec(url.pathname);
         const facetMatch = /^\/v1\/categories\/([^/]+)\/facets$/.exec(url.pathname);
-        const methods = facetMatch ? ['POST'] : detailMatch || filterMatch ? ['GET'] : Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
+        const methods = facetMatch ? ['POST'] : detailMatch || offerMatch || filterMatch ? ['GET'] : Object.hasOwn(routes, url.pathname) ? routes[url.pathname] : null;
         if (!methods) throw new HttpError(404, 'NOT_FOUND', 'Endpoint not found');
-        event.route = facetMatch ? '/v1/categories/:category/facets' : filterMatch ? '/v1/categories/:category/filters' : detailMatch ? '/v1/products/:id' : url.pathname;
+        event.route = facetMatch ? '/v1/categories/:category/facets' : filterMatch ? '/v1/categories/:category/filters' : offerMatch ? '/v1/products/:id/offers' : detailMatch ? '/v1/products/:id' : url.pathname;
         headers.set('Allow', [...methods, 'OPTIONS'].join(', '));
         if (request.method === 'OPTIONS') {
           const method = request.headers.get('access-control-request-method');
@@ -249,8 +254,8 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
             // Revalidate the stable public URL; only the epoch-keyed internal cache
             // has a freshness lifetime, so browsers cannot retain an old release.
             headers.set('Cache-Control', 'public, max-age=0, must-revalidate');
-          } else if (detailMatch) {
-            const id = Number(detailMatch[1]);
+          } else if (detailMatch || offerMatch) {
+            const id = Number((detailMatch ?? offerMatch)[1]);
             if (!Number.isSafeInteger(id)) invalid('Invalid product ID');
             const policy = productDetailCache(url, id, env);
             const cache = injectedCache ?? globalThis.caches?.default;
@@ -273,6 +278,16 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
                   catch { event.cache_status = 'BYPASS'; event.cache_error = 'put'; }
                 }
               } finally { release(); }
+            }
+            if (offerMatch) {
+              const product = cachedBody === undefined ? payload : JSON.parse(cachedBody);
+              cachedBody = undefined;
+              event.product_cache_status = event.cache_status;
+              event.cache_status = 'BYPASS';
+              headers.delete('Age');
+              headers.delete('X-Cache-TTL');
+              payload = await loadOffers({ product, url, env, cache, event, headers });
+              event.cache_status = event.offer_cache_status;
             }
           } else if (url.pathname === '/v1/products/resolve') {
             let refs;
@@ -351,7 +366,7 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
           }
         }
       } catch (error) {
-        const known = error instanceof HttpError || error instanceof ProtectionError;
+        const known = error instanceof HttpError || error instanceof ProtectionError || error instanceof OfferProviderError;
         status = known ? error.status : 500;
         const code = known ? error.code : 'INTERNAL_ERROR';
         payload = { error: { code, message: known ? error.message : 'Internal server error' }, request_id: requestId };
@@ -360,6 +375,10 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
         headers.delete('X-Cache-TTL');
         if (status === 503) headers.set('Retry-After', '30');
         if (error instanceof ProtectionError) headers.set('Retry-After', String(error.retryAfter));
+        if (error instanceof OfferProviderError) {
+          event.provider_error_reason = error.reason;
+          if (error.retryAfter !== null) headers.set('Retry-After', String(error.retryAfter));
+        }
       }
       Object.assign(event, { status, elapsed_ms: Math.round((performance.now() - started) * 100) / 100 });
       headers.set('X-Cache', event.cache_status);
