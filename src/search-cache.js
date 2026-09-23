@@ -39,7 +39,7 @@ export async function readSearchCache(cache, key, ttl, now) {
     void response.body?.cancel().catch(() => {});
     return null;
   }
-  return { body: await response.text(), age: Math.floor(age / 1000) };
+  return { body: await response.text(), age: Math.floor(age / 1000), storedAt };
 }
 
 export async function writeSearchCache(cache, key, body, ttl, now) {

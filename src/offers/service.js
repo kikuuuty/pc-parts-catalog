@@ -22,7 +22,8 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs,
           const offers = JSON.parse(hit.body);
           if (!Array.isArray(offers)) throw new Error('Invalid cache');
           metrics.offer_cache_status = 'HIT';
-          return { offers, age: hit.age };
+          const fetchedAt = offers.length ? Math.min(...offers.map(o => Date.parse(o.fetched_at))) : hit.storedAt;
+          return { offers, age: hit.age, fetchedAt, expiresAt: Math.min(hit.storedAt, fetchedAt) + policy.ttl * 1000 };
         }
       } catch { metrics.offer_cache_status = 'BYPASS'; metrics.offer_cache_error = 'match'; }
     }
@@ -46,11 +47,12 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs,
       throw error.status === 429 ? rateLimited('miss_budget', error.retryAfter) : unavailable('protection');
     }
     const offers = await fetchYahooOffers({ appId: env.YAHOO_SHOPPING_APP_ID, jan: lookup.value, fetch: fetcher, now, timeoutMs, event: metrics });
+    const fetchedAt = offers.length ? Date.parse(offers[0].fetched_at) : now();
     if (useCache) {
-      try { await writeSearchCache(cache, policy.key, JSON.stringify(offers), policy.ttl, now()); }
+      try { await writeSearchCache(cache, policy.key, JSON.stringify(offers), policy.ttl, fetchedAt); }
       catch { metrics.offer_cache_status = 'BYPASS'; metrics.offer_cache_error = 'put'; }
     }
-    return { offers };
+    return { offers, fetchedAt, expiresAt: fetchedAt + policy.ttl * 1000 };
   }
 
   return async function loadOffers({ product, url, env, cache, event, headers }) {
@@ -61,9 +63,11 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs,
     const base = { product: { id: product.id, name: product.name }, provider: 'yahoo' };
     if (!candidates.length) {
       event.offer_count = 0;
-      return { ...base, lookup: { status: 'unsupported', strategy: null, reason: 'no_supported_identifier' }, offers: [] };
+      return { payload: { ...base, lookup: { status: 'unsupported', strategy: null, reason: 'no_supported_identifier' }, offers: [] },
+        resolution: { unsupported: true, observedAt: now() } };
     }
     const context = {};
+    let observedAt = Infinity, expiresAt = Infinity;
     try {
       for (const [index, lookup] of candidates.entries()) {
         event.lookup_strategy = lookup.strategy;
@@ -84,7 +88,9 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs,
           Object.assign(event, task.metrics);
           if (inflight.get(key) === task) inflight.delete(key);
         }
-        const { offers, age } = result;
+        const { offers, age, fetchedAt } = result;
+        observedAt = Math.min(observedAt, fetchedAt);
+        expiresAt = Math.min(expiresAt, result.expiresAt);
         // Only a successful, normalized empty result (including cached []) advances.
         // Errors propagate, and the first nonempty candidate is never unioned with others.
         if (!offers.length && index + 1 < candidates.length) continue;
@@ -92,7 +98,8 @@ export function createOfferService({ fetch: fetcher, now = Date.now, timeoutMs,
         if (age !== undefined) headers.set('Age', String(age));
         event.offer_count = offers.length;
         event.lookup_hit_index = offers.length ? index + 1 : 0;
-        return { ...base, lookup: { status: 'complete', strategy: lookup.strategy, reason: null }, offers };
+        return { payload: { ...base, lookup: { status: 'complete', strategy: lookup.strategy, reason: null }, offers },
+          resolution: { offers, lookupStrategy: lookup.strategy, fetchedAt, observedAt, expiresAt } };
       }
     } finally {
       if (owner === context) owner = null;

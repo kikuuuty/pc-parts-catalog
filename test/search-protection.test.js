@@ -61,6 +61,26 @@ test('bootstrap admits 40 cold reads and rejects the 41st before D1/global token
   assert.equal((await h.fetch(bootstrapPaths[40])).status, 200);
 });
 
+test('bulk summaries share global D1 admission without spending search/facet/Yahoo tiers; 61st read rejects and recovers', async () => {
+  const h = protectionWorker();
+  const summary = () => h.fetch('/v1/products/offers/summary', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ product_ids: Array.from({ length: 20 }, (_, i) => i + 1) }) });
+  for (let i = 0; i < 20; i++) {
+    assert.equal((await h.request({ ...broad, keyword: `ddr5${'!'.repeat(i + 1)}` })).status, 200);
+    assert.equal((await facet(h)).status, 200);
+    assert.equal((await summary()).status, 200);
+    assert.equal(h.logs.at(-1).d1_queries, 1);
+    assert.equal(h.logs.at(-1).rate_limit_class, 'd1_miss');
+  }
+  assert.equal(h.env.D1_MISS_LIMITER.calls.length, 60);
+  assert.equal(h.env.EXPENSIVE_MISS_LIMITER.calls.length, 20);
+  assert.equal(h.env.FACET_MISS_LIMITER.calls.length, 20);
+  assert.equal(h.env.YAHOO_OFFER_MISS_LIMITER.calls.length, 0);
+  assert.equal(h.env.BOOTSTRAP_MISS_LIMITER.calls.length, 0);
+  await rateLimited(await summary()); noD1(h);
+  h.advance(60000); assert.equal((await summary()).status, 200);
+});
+
 test('20 Search + 20 Bootstrap + 20 Facet use independent budgets and stop at global 61st MISS', async () => {
   const h = protectionWorker();
   for (let i = 0; i < 20; i++) {

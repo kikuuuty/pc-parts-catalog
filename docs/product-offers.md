@@ -3,7 +3,8 @@
 `GET /v1/products/:id/offers` は、選択済みのactiveなカタログ製品について、
 canonical JANを最優先し、canonical EAN-13も含む上位最大3候補を順番にYahoo!ショッピングの商品検索（v3）で照合します。
 正常な200応答を正規化してOfferが0件だった場合だけ次候補へ進み、最初の完全一致Offerを返します。
-初版はYahooのみ。価格はD1へ保存せず、catalog検索の並び順にも使用しません。
+初版はYahooのみ。Offer全件はCache APIへ保存し、最終結果の小さなsummaryだけD1へ保存します。
+catalog検索の並び順には使用しません。[Bulk Offer Summary](offer-summary.md)から最大20製品分を外部アクセスなしで参照できます。
 
 ## HTTP contract
 
@@ -217,6 +218,10 @@ seller logo URLを取得できるProviderでは`seller.image.url`へ直接mappin
    各candidateのcacheを順に確認するため、`HIT [] → HIT offers`なら外部アクセスなしで解決します。
    product単位のlookup-resolution cacheは追加しません。
 5. cache match/put障害でもYahoo専用保護を必ず通します。取得成功なら200＋BYPASS。
+6. 最終的な正常結果（Offerあり／全候補空／unsupported）からD1のsummary cacheを更新します。
+   cache HITからもbackfillできますが、元の取得時刻・TTLを延長しません。fallback中間結果は保存しません。
+   summary writeは応答前にawaitし、D1保護拒否／障害時も正常なOffer responseを維持します。
+   同一isolateの成功済みwriteはbounded hintで省略。詳細は[保存・保護方針](offer-summary.md)。
 
 catalog releaseのepoch更新でDetailとOfferの両方を切り替え、DB再構築時のID再割当やidentifier変更と分離します。
 out-of-bandなidentifier／active変更にはepoch更新が必要です。更新しない場合、
@@ -292,7 +297,7 @@ npm run smoke:yahoo -- --live --jan <verified-JAN>
 npm run worker:dev
 curl http://127.0.0.1:8787/v1/products/<product-id>/offers
 
-# A3メッシュ版＋9800X3Dの実local Worker検証（実Yahoo呼出し）
+# A3メッシュ版＋9800X3D＋Bulk summaryの実local Worker検証（実Yahoo呼出し、migration 0010適用後）
 # 隔離port／cache epochで起動し、検証後にそのWorkerだけ停止
 node scripts/verify-yahoo-fallback-local.js --live --a3-id 22309 --ryzen-id 372
 ```

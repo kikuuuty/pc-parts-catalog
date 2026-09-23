@@ -9,7 +9,10 @@ category → category registry → category-specific FTS → candidate retrieval
   → typed filters / facets / ranges → stable display ordering
   → cursor pagination (keywordはbounded OFFSET) → frontend selection
   → GET /v1/products/:id → canonical identifiers
-  → GET /v1/products/:id/offers → JAN優先 / EAN-13 fallback exact lookup → Yahoo!ショッピング Offer
+   → GET /v1/products/:id/offers → JAN優先 / EAN-13 fallback exact lookup → Yahoo!ショッピング Offer
+   → 正常な最終Offer結果 → D1 summary cache
+
+search results (最大20 IDs) → POST /v1/products/offers/summary → cached price summaries（Yahooアクセスなし）
 
 saved/shared build → source + upstream_key
   → POST /v1/products/resolve → current product ID/status
@@ -63,6 +66,7 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 |`POST /v1/search`|keyword、typed filters、ranges、facets、identifier、orderBy|
 |`GET /v1/products/:id`|選択した製品の詳細とcanonical identifiers|
 |`GET /v1/products/:id/offers`|canonical JAN優先／EAN-13 fallback完全一致のYahoo販売候補（価格昇順、最大50件）|
+|`POST /v1/products/offers/summary`|最大20製品の既取得最安価格summaryを一括参照。Yahooへの外部アクセスなし|
 |`POST /v1/products/resolve`|最大64 stable refsを現在のIDとactive/inactive/missingへ一括解決|
 
 検索にはcategoryが必須です。通常候補一覧にはidentifierを付けません。必要なクライアントは既存の`include: ["identifiers", "facets"]`も使用できます。
@@ -81,15 +85,15 @@ npm run verify:search:local -- --source-location .cache/all-categories-fresh-loc
 
 - keywordなしdefault: manufacturer → series（NULLS LAST）→ name → id ASC、文字列はNOCASE。明示的`orderBy`はこのtupleの前に指定fieldを追加します。
 - keywordあり: relevance → manufacturer → series → name → id。`orderBy`指定でもrelevanceが最優先です。
-- 価格はcatalogに保持しません。将来のprice sortはProviderの価格データを統合する層の責務です。
+- 価格はcatalogの属性にせず、独立した期限付きsummary cacheへ保持します。検索のprice sortには使用しません。
 - filtersは同field内OR・field間AND、rangeは包含境界。NULLは条件一致にしません。
 - 既定20件、最大50件。keywordありは1,000件window＋`meta.next_offset`。keywordなしはwindowを持たず、`meta.next_cursor`を同一条件と送信します。nonzero OFFSETは400です。
 - `window_exhausted=true`は絞り込みを促すUI状態です。詳細は[pagination契約](docs/pagination.md)。
 - keyword GET検索は標準20件・先頭6ページだけedge cache。cursor・POST・resolveはBYPASS。ブラウザ向けは`no-store`、CORS `*`。
 - 詳細なHTTP契約は[API文書](docs/cloudflare-production.md)、Product Detailは[詳細API文書](docs/product-detail.md)。
 
-Yahoo!ショッピングProviderはcanonical `jan`のexact lookupを最優先し、選択できるJANがない場合だけ
-安全なcanonical `ean`（EAN-13、region `jp`／`all`）へfallbackします。両方ない製品は外部検索せず
+Yahoo!ショッピングProviderはcanonical `jan`のexact lookupを最優先し、安全なcanonical `ean`
+（EAN-13、region `jp`／`all`）も含む最大3候補を逐次照合します。正常な200／0件だけ次候補へ進み、最初のhitで終了します。両方ない製品は外部検索せず
 `lookup.status=unsupported`と空の`offers`を返します。価格はYahoo表示価格、送料は区分だけを保持し、
 推定送料・PayPayポイント込み実質価格は計算しません。Offer cacheは既定30分、専用MISS予算は30回/60秒。
 `YAHOO_SHOPPING_APP_ID`はsecretとして設定します（local: `.dev.vars.local`）。
@@ -99,6 +103,13 @@ MPN/name fallbackとYahoo以外のProviderは未実装です。
 canonical DBのEANをJANへ変換・追加せず、UPC／GTIN-14／EAN-8からの変換も行いません。
 API／telemetry／cacheのstrategyは`jan`と`ean13_as_jan`を区別します。
 AMD Ryzen 7 9800X3D（確認時product ID 372）のEAN `0730143315289`が代表例です。
+
+検索一覧の価格表示には`POST /v1/products/offers/summary`へ`{"product_ids":[372,22309]}`を送ります。
+最大20件、入力順・重複を保持し、D1のindexed batch lookup 1 queryで返します。20件の`/offers`並列呼出しはしないでください。
+単一`/offers`の正常な最終結果からsummaryが育ち、`complete`（価格あり）、`empty`（正常取得済み0件）、
+`unsupported`（barcode非対応を確認済み）、`pending`（未取得／期限切れ）、`missing`（不存在／inactive）を区別します。
+`pending.offer_count=null`、`empty/unsupported.offer_count=0`です。TTLはOfferと共通の既定30分、epoch／generationで無効化します。
+Bulk自体はYahooへアクセスせず、初版では全件Cron・Queue warmupを行いません。仕様と将来の拡張点は[Bulk Offer Summary](docs/offer-summary.md)。
 
 カテゴリ別filter UIは`GET /v1/categories/:category/filters`の`control`・`target`・`value_type`・`options` / `range`から構築できます。
 メーカーを含むcurated定義をbackendで管理し、選択値を`POST /v1/search`の`filters` / `ranges` / `facets`へ送ります。
@@ -159,7 +170,8 @@ benchmarkは測定、release gateは自動チェックの合否判定です。�
 ## Migration / sync / local data
 
 `0001`〜`0007`は適用済みmigration履歴として保持します。`0008_category_fts.sql`をgeneratorで管理し、`schema:check`で一致を確認します。
-今回追加の`0009_display_order.sql`は一覧用indexのみで、既存migrationは変更していません。
+`0009_display_order.sql`は一覧用index、`0010_product_offer_summary.sql`は現在値の価格summary cacheです。
+summary機能を使う環境には0010を適用してください。既存migrationは変更していません。
 既存製品ID/raw/spec/identifier/facetを保って検索索引を移行します。normalizer versionは1です。
 
 - `ingest`への1 SQL statementがproduct・raw・identifier・facet・typed spec・FTSをatomic更新。

@@ -146,6 +146,13 @@ export async function protectYahooOfferMiss(env, event) {
   Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: 'yahoo_offer_miss' });
 }
 
+// Bounded summary reads/writes share the global D1 budget, not search's expensive
+// tier or Yahoo's external budget. One request covers the entire <=20-ID batch.
+export async function protectOfferSummary(env, event) {
+  await check(env, event, 'D1_MISS_LIMITER', 'search-d1-miss', 'd1_miss');
+  Object.assign(event, { rate_limit_status: 'allowed', rate_limit_class: 'd1_miss' });
+}
+
 // Predeploy must reject missing, shared, or silently loosened bindings in either environment.
 export function validateProtectionConfig(config) {
   const namespaces = new Set();

@@ -1,7 +1,7 @@
 import { categories, models } from './model.js';
 import { searchQuery } from './queries.js';
 import { searchCachePolicy, searchCacheKey, readSearchCache, writeSearchCache } from './search-cache.js';
-import { protectSearch, protectBootstrap, protectFacet, protectHealth, ProtectionError, createRefillGuard } from './search-protection.js';
+import { protectSearch, protectBootstrap, protectFacet, protectHealth, protectOfferSummary, ProtectionError, createRefillGuard } from './search-protection.js';
 import { loadProductDetail, productDetailCache } from './product-detail.js';
 import { searchWindow, cursorContext, decodeCursor, encodeCursor } from './pagination.js';
 import { validateReferences, resolveProducts } from './product-reference.js';
@@ -9,9 +9,11 @@ import { loadFilterMetadata, filterMetadataCache, FilterOptionLimitError } from 
 import { dynamicFacetQueries, loadDynamicFacets } from './dynamic-facets.js';
 import { createOfferService } from './offers/service.js';
 import { OfferProviderError } from './offers/errors.js';
+import { validateSummaryInput, summaryPolicy, loadOfferSummaries, createSummaryWriter } from './offers/summary.js';
 
 const MAX_BODY = 16 * 1024;
-const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'], '/v1/products/resolve':['POST'] };
+const routes = { '/v1/health': ['GET'], '/v1/categories': ['GET'], '/v1/search': ['GET', 'POST'], '/v1/products/resolve':['POST'],
+  '/v1/products/offers/summary': ['POST'] };
 const fields = ['category', 'keyword', 'filters', 'ranges', 'facets', 'identifier', 'orderBy', 'limit', 'offset', 'include', 'cursor'];
 const productFields = ['id', 'source', 'upstream_id', 'upstream_key', 'category', 'manufacturer', 'name', 'series', 'variant', 'release_year', 'manufacturer_url'];
 const source = {
@@ -128,11 +130,12 @@ async function searchInput(request, url) {
 }
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
-// No CLI, REST credentials, writes, SQL logging, or user-controlled SQL here.
+// No CLI, REST credentials, catalog writes, SQL logging, or user-controlled SQL here.
 export function createWorker({ log = entry => console.log(JSON.stringify(entry)), cache: injectedCache, now = Date.now,
   offerFetch, offerTimeoutMs, offerSleep } = {}) {
   const refillGuard = createRefillGuard();
   const loadOffers = createOfferService({ fetch: offerFetch, now, timeoutMs: offerTimeoutMs, sleep: offerSleep });
+  const writeSummary = createSummaryWriter({ now });
   return {
     async fetch(request, env) {
       const started = performance.now();
@@ -286,9 +289,30 @@ export function createWorker({ log = entry => console.log(JSON.stringify(entry))
               event.cache_status = 'BYPASS';
               headers.delete('Age');
               headers.delete('X-Cache-TTL');
-              payload = await loadOffers({ product, url, env, cache, event, headers });
+              const result = await loadOffers({ product, url, env, cache, event, headers });
+              payload = result.payload;
               event.cache_status = event.offer_cache_status;
+              // Best-effort cache side effect, awaited so a following bulk request
+              // sees it. Failure must not discard successfully obtained Offers.
+              try {
+                event.summary_write_status = await writeSummary({ product, resolution: result.resolution, env,
+                  save: async (sql, params) => {
+                    // A cold Detail already admitted this request to the D1 budget.
+                    if (event.d1_queries === 0) await protectOfferSummary(env, {});
+                    return execute(sql, params);
+                  } });
+              } catch (error) {
+                event.summary_write_status = error instanceof ProtectionError ? 'protected' : 'error';
+              }
             }
+          } else if (url.pathname === '/v1/products/offers/summary') {
+            const input = await jsonInput(request);
+            let ids;
+            try { ids = validateSummaryInput(input); } catch (error) { invalid(error.message); }
+            const policy = summaryPolicy(env);
+            event.summary_product_count = ids.length;
+            await protectOfferSummary(env, event);
+            payload = await loadOfferSummaries(execute, ids, policy, now());
           } else if (url.pathname === '/v1/products/resolve') {
             let refs;
             const input=await jsonInput(request);

@@ -57,8 +57,8 @@ async function stop() {
 }
 const interrupt = () => { void stop(); };
 process.once('SIGINT', interrupt); process.once('SIGTERM', interrupt);
-async function request(path) {
-  return fetch(`${origin}${path}`, { signal: AbortSignal.timeout(25000) });
+async function request(path, init) {
+  return fetch(`${origin}${path}`, { ...init, signal: AbortSignal.timeout(25000) });
 }
 try {
   const deadline = Date.now() + 60000;
@@ -72,7 +72,25 @@ try {
     if (spawnFailed || worker.exitCode !== null || Date.now() >= deadline) throw new Error('Local Worker readiness failed');
     await delay(500);
   }
-  const results = [];
+  const bulkIds = [Number(args['a3-id']), Number(args['ryzen-id']), ...Array.from({ length: 18 }, (_, i) => i + 1)];
+  async function bulk() {
+    const response = await request('/v1/products/offers/summary', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ product_ids: bulkIds }) });
+    assert.equal(response.status, 200);
+    const body = await response.json(), id = response.headers.get('X-Request-ID');
+    for (let i = 0; i < 20 && !events.some(e => e.request_id === id); i++) await delay(100);
+    const event = events.find(e => e.request_id === id);
+    assert(event); assert.equal(event.d1_queries, 1); assert.equal(event.d1_operations, 1);
+    assert.equal(event.rows_written, 0); assert(event.rows_read >= 0 && event.rows_read <= 80);
+    assert.equal(event.rate_limit_class, 'd1_miss'); assert.equal(event.provider, undefined);
+    assert.equal(event.upstream_duration_ms, undefined); assert.equal(event.lookup_attempts, undefined);
+    assert.deepEqual(body.products.map(p => p.id), bulkIds);
+    return { products: body.products, metrics: { queries: event.d1_queries, rows_read: event.rows_read,
+      rows_written: event.rows_written, elapsed_ms: event.elapsed_ms, yahoo_requests: 0 } };
+  }
+  const cold = await bulk();
+  assert(cold.products.slice(0, 2).every(p => p.status === 'pending' && p.offer_count === null && p.fetched_at === null));
+  const results = [], expectedSummaries = [];
   for (const [label, id, name, expectedCodes, hitIndex] of [
     ['a3_mesh', args['a3-id'], a3WhiteWoodMesh.metadata.name, [A3_FIRST_EAN, A3_YAHOO_EAN], 2],
     ['ryzen9800x3d', args['ryzen-id'], 'AMD Ryzen 7 9800X3D', [RYZEN_EAN], 1],
@@ -92,6 +110,8 @@ try {
     assert(body.offers.length > 0, `${label}: at least one live Offer`);
     assert(body.offers.every(o => o.jan_code === expectedCodes[hitIndex - 1]), `${label}: exact match`);
     assert(body.offers.every(o => o.image && o.seller.image && o.fetched_at), `${label}: normalized metadata`);
+    expectedSummaries.push({ id: Number(id), status: 'complete', lowest_price: Math.min(...body.offers.map(o => o.price)),
+      offer_count: body.offers.length, fetched_at: body.offers[0].fetched_at });
     const second = await request(`/v1/products/${id}/offers`);
     assert.equal(second.status, 200); assert.equal(second.headers.get('X-Cache'), 'HIT');
     assert.deepEqual(await second.json(), body, `${label}: HIT preserves all metadata and fetched_at`);
@@ -104,6 +124,8 @@ try {
     assert.equal(miss.lookup_attempts, hitIndex); assert.equal(miss.lookup_hit_index, hitIndex);
     assert.equal(miss.lookup_candidate_count, Math.min(candidates.length, 3));
     assert.equal(miss.rate_limit_class, 'yahoo_offer_miss'); assert.equal(miss.rate_limit_status, 'allowed');
+    assert.equal(miss.summary_write_status, 'stored'); assert(miss.rows_written > 0);
+    assert.equal(hit.summary_write_status, 'unchanged');
     assert.equal(hit.lookup_attempts, hitIndex); assert.equal(hit.rate_limit_status, 'not_checked');
     const logs = JSON.stringify(events);
     for (const value of [...candidates.map(c => c.value), name, 'https://', 'appid=']) assert(!logs.includes(value), 'Private lookup data in telemetry');
@@ -112,7 +134,11 @@ try {
       repeat_budget: hit.rate_limit_status, exact_match: true, metadata_preserved: true, telemetry_private: true });
     await delay(1100);
   }
-  const report = { ok: true, runtime: 'local workerd', live: true, results };
+  const warm = await bulk();
+  assert.deepEqual(warm.products.slice(0, 2), expectedSummaries);
+  assert.deepEqual(warm.products.slice(2), cold.products.slice(2));
+  const report = { ok: true, runtime: 'local workerd', live: true, results,
+    summary: { product_count: bulkIds.length, cold: cold.metrics, warm: warm.metrics, pending_to_complete: true } };
   await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify(report, null, 2));
 } finally {
