@@ -317,17 +317,31 @@ fakeのexact countをeventualなproductionへ外挿しない。
 
 `node scripts/verify-rate-smoke.js`はSearchの200/429保護契約とD1 pre-admission protectionを確認する。固定のSQL read量・query数・検索結果件数は検証せず、検索品質・結果一致・コスト評価は既存benchmark / API verificationに任せる。
 
-- 共通: HTTP 200または429、`Cache-Control: no-store`、`X-Cache: BYPASS`、`X-Request-ID`、telemetry `rate_limit_class=expensive_miss`。
-- 200: `rate_limit_status=allowed`、有限の`d1_queries > 0`、有限で非負の`rows_read`。query分割やcatalog更新によるread量変化を許容する。
-- 429: `Retry-After: 60`、CORS `*`と`Retry-After`のexpose、既存の`RATE_LIMITED` / `Too many search requests`、body/headerのrequest ID一致。`rate_limit_status=denied`、**`d1_queries=0`・`rows_read=0`・`rows_written=0`**でD1実行前の拒否を確認する。
+- 共通: HTTP 200または429、`Cache-Control: no-store`、`X-Cache: BYPASS`、`X-Request-ID`、telemetryのstatus/request IDがHTTP応答と一致。
+- 200: `rate_limit_class=expensive_miss`、`rate_limit_status=allowed`、有限の`d1_queries > 0`、有限で非負の`rows_read`。query分割やcatalog更新によるread量変化を許容する。200の`d1_miss`は不正。
+- 429: `rate_limit_class`は`expensive_miss`または`d1_miss`のみ許容。`Retry-After: 60`、CORS `*`と`Retry-After`のexpose、既存の`RATE_LIMITED` / `Too many search requests`、body/headerのrequest ID一致。`rate_limit_status=denied`、**`d1_queries=0`・`rows_read=0`・`rows_written=0`**でD1実行前の拒否を確認する。
 
-安価な`POST /v1/search`（cpu / 14900k）を**最大24件、300ms間隔**で送る。少なくとも1件の429が必要だが、colo-local / eventually consistentなproduction bindingと別trafficのwindow状態のため「20件成功・21件目拒否」はassertしない。429未観測なら失敗としてdeployment/configurationを確認し、その場でrequest数を増やさない。Facetのproduction burstは行わない。
+安価な`POST /v1/search`（cpu / 14900k）を**最大24件、300ms間隔**で送る。成功には少なくとも1件の**`expensive_miss`による429**と、全観測応答の契約正常が必要。colo-local / eventually consistentなproduction bindingと別trafficのwindow状態のため「20件成功・21件目拒否」はassertしない。Facetのproduction burstは行わない。
 
-stdoutには総request数、200/429件数、HTTP latency・CPU分布、allowed/limited samples、allowed readsのmin/p50/p95/max、観測class別件数を出力する。これらのcost分布に固定の合否thresholdは置かない。429が未観測でもsummaryを出してから失敗し、全sampleは従来どおり`.cache/rate-production-429.json`へ保存、tailはfinallyで停止する。
+他のSearch/Facet trafficが共通D1 budgetを消費していると、expensive limiter通過後に`d1_miss`で拒否され得る。これは正常な保護動作として契約全体を検証し、**最初の`d1_miss` 429で送信を終了**する。後段拒否で前段tokenをrefundできないため、Search専用拒否を出す目的で送信を続けない。window待ち・自動再試行・request追加は行わない。
+
+|観測結果|`contract` / exit code|解釈|
+|---|---|---|
+|`expensive_miss` 429を1件以上観測、全応答の契約正常|`pass` / 0|Search専用拒否を確認済み。その後の正常な`d1_miss`でも早期終了して成功|
+|`d1_miss` 429のみ観測|`inconclusive` / 1|共通D1保護は確認済み、Search専用拒否は未確認。不具合とは断定しない|
+|24件で429なし|`inconclusive` / 1|拒否経路未確認。eventual consistency・他traffic/window状態・deployment/configurationを確認|
+|HTTP/telemetry契約違反・想定外class・測定失敗|`failed` / 非ゼロ|不正な応答を正常な早期終了・未完了として扱わない|
+
+stdoutには総request数、200/429件数、HTTP latency・CPU分布、allowed/limited samples、allowed readsのmin/p50/p95/max、観測class別件数を出力する。さらに`limited_by_class`で429だけのclass別件数、`coverage`で`allowed` / `expensive_miss_denied` / `d1_miss_denied`の`observed` / `not_observed`、`stop_reason`で`request_limit` / `global_d1_limit`を記録する。最初から429ならallowedは未確認であり、成功を捏造しない。
+cost分布に固定の合否thresholdは置かない。未完了でもsummaryを出し、結果と全sampleを従来どおり`.cache/rate-production-429.json`へ保存、tailはfinallyで停止する。契約/測定失敗時も取得済みsampleと`failed`を保存する。
+
+`scripts/lib/rate-smoke.js`の同じ判定・送信ループを`test/rate-smoke.test.js`からoffline実行し、共通D1拒否時の追加送信0、専用拒否未観測時の非ゼロ結果、専用→共通の混在、24件上限とpace、不正な429の早期終了前検証を確認する。
 
 exactなSearch 20件→21件目拒否、Facet 30件→31件目拒否、共通D1 60件→61件目拒否とbudget分離は`test/search-protection.test.js`のdeterministic fake limiterで確認する。production smokeは実Cloudflare環境で契約が機能することを確認する役割に限定する。
 
 2026-09-23のcontract smoke更新後の実行は**24件中200=21、429=3**で成功。全24件のclassは`expensive_miss`、429全件でD1 queries / rows_read / rows_written=0を確認した。HTTP p50/p95/maxは108.80/140.83/160.27ms、CPUは1/2/5ms。allowed readsのmin/p50/maxは29/29/29、合計609 reads。これらは今回の観測値であり次回の固定期待値にはしない。`npm run check`（schema＋233 tests、skip 0）、`npm run verify:protection`（17 tests）、scriptの`node --check`、`git diff --check`も成功。
+
+同日の`d1_miss`早期終了・coverage対応後の再検証も24件中200=21、`expensive_miss` 429=3、`d1_miss` 429=0で`pass` / exit 0。coverageはallowed・expensive拒否がobserved、D1拒否はnot_observed。HTTP p50/p95/maxは112.83/150.00/169.92ms、CPUは2/15/15ms。本番でD1上限を意図的に消費する追加probeは行わず、global-only未完了と早期終了はoffline 7 testsで確認した。全240 tests（skip 0）、protection 17 tests、smoke/判定moduleの構文チェックが成功。
 
 ### 小規模production POST 429 probe（2026-09-13の実測）
 
