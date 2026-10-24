@@ -6,7 +6,7 @@ import { models, NORMALIZER_VERSION } from './model.js';
 import { normalize, normalizeV1 } from './normalize.js';
 import { INPUT_CONTRACT_VERSION, validateNormalized } from './input-contract.js';
 import { loadQualityCatalog } from './quality/catalog.js';
-import { ingestionQuality } from './quality/ingestion.js';
+import { ingestionQuality, DEFAULT_MAX_DELETE_FRACTION } from './quality/ingestion.js';
 
 export const PLAN_DIRECTORY = '.cache/application-plans';
 const canonical = value => JSON.stringify(value, (_, v) => v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map(k => [k,v[k]])) : v);
@@ -17,6 +17,22 @@ const sorted = rows => [...rows].sort((a,b) => canonical(a) < canonical(b) ? -1 
 export const recordDigest = r => digest({ ...r, identifiers: sorted(r.identifiers), facets: sorted(r.facets) });
 const productFields = ['upstream_id','upstream_key','category','manufacturer','name','series','variant','release_year','manufacturer_url','identity_version','content_hash','source_commit','normalization_version'];
 export async function latestSync(db) { return (await db.query('SELECT * FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0] ?? null; }
+
+// Called only while holding the writer lease, before auto-resume or planning.
+// Every writer records sync_runs BEFORE its first product write. Therefore an
+// unchanged completed base (or no history AND no products) proves no start.
+export async function assertUnstartedBase(db, latest, pin) {
+  assert.equal(latest?.id ?? null, pin.base_sync_id, 'plan_recovery_base_changed');
+  assert(!latest || latest.status === 'complete', 'plan_recovery_base_not_complete');
+  if (Object.hasOwn(pin, 'base_plan_hash')) assert.equal(latest?.plan_hash ?? null, pin.base_plan_hash, 'plan_recovery_base_plan_changed');
+  if (Object.hasOwn(pin, 'base_source_commit')) assert.equal(latest?.source_commit ?? null, pin.base_source_commit, 'plan_recovery_base_commit_changed');
+  const others = latest
+    ? await db.query("SELECT count(*) n FROM sync_runs WHERE id<>? AND (started_at>=? OR status='running')", [latest.id, latest.started_at])
+    : await db.query('SELECT count(*) n FROM sync_runs');
+  assert.equal(others.results[0].n, 0, 'plan_recovery_sync_already_started');
+  if (!latest) assert.equal((await db.query('SELECT count(*) n FROM products')).results[0].n, 0, 'plan_recovery_initial_products_exist');
+  assert.equal((await db.query('SELECT count(*) n FROM ingest')).results[0].n, 0, 'plan_recovery_unfinished_ingest');
+}
 
 // Paged reads; no per-product D1 requests. Called under the writer lease.
 export async function storedCatalog(db) {
@@ -67,7 +83,8 @@ export function validateBaseline(rows, source) {
   if (byKey) assert.equal(rows.filter(r => r.active).length, byKey.size, 'Baseline source count differs');
 }
 
-export function makeApplicationPlan(snapshot, baseline, base, { maxDeleteFraction = .2, baselineSource, baselinePlan } = {}) {
+export function makeApplicationPlan(snapshot, baseline, base, { maxDeleteFraction = DEFAULT_MAX_DELETE_FRACTION, baselineSource, baselinePlan, workflowRunId } = {}) {
+  assert(Number.isFinite(maxDeleteFraction) && maxDeleteFraction >= 0 && maxDeleteFraction <= 1, 'Invalid deletion threshold');
   assert(!base || base.status === 'complete', 'Missing plan: partial/failed DB cannot become a normal baseline');
   assert(base || baseline.length === 0, 'Baseline has no completed sync');
   if (snapshot.presence) assert.equal(snapshot.complete, true, 'Snapshot inventory is incomplete');
@@ -88,7 +105,7 @@ export function makeApplicationPlan(snapshot, baseline, base, { maxDeleteFractio
   for (const key of accepted.keys()) assert(presence.has(key), 'Accepted identity missing from inventory');
   const previous = { ...Object.fromEntries([...new Set(baseline.filter(r => r.active).map(r => r.record.product.category))].map(c => [c, { last_good_commit: base?.source_commit ?? null }])),
     ...(base?.report_json ? JSON.parse(base.report_json).quality?.categories ?? {} : {}) };
-  const quality = ingestionQuality(snapshot, baseline, previous);
+  const quality = ingestionQuality(snapshot, baseline, previous, { maxDeleteFraction });
   const previousRows = new Map(baselinePlan?.rows.map(r => [r.key,r]) ?? []);
   const rows = [], deletions = [], retained = [];
   const oldKeys = new Set();
@@ -132,6 +149,7 @@ export function makeApplicationPlan(snapshot, baseline, base, { maxDeleteFractio
   }
   quality.status = retained.length || Object.keys(quality.held).length || snapshot.quarantined?.length ? 'held' : snapshot.report?.diagnostics?.total ? 'warnings' : 'clean';
   const plan = { version: 1, commit: snapshot.commit, contract_version: INPUT_CONTRACT_VERSION, normalization_version: NORMALIZER_VERSION,
+    ...(workflowRunId ? { workflow_run_id: workflowRunId } : {}),
     max_delete_fraction: maxDeleteFraction,
     base_sync_id: base?.id ?? null, base_plan_hash: base?.plan_hash ?? null, baseline_hash: digest(baseline.map(r => [r.id, r.active, recordDigest(r.record), r.local_hash])),
     input_hash: snapshotDigest(snapshot), created_at: new Date().toISOString(), presence: snapshot.presence ?? [...presence].map(upstream_key => ({ upstream_key })),
@@ -169,6 +187,10 @@ export function publishedSnapshot(plan) {
 
 export function assertPlanBase(plan, latest) {
   assert((latest?.id ?? null) === plan.base_sync_id || latest?.plan_hash === plan.hash && latest.source_commit === plan.commit, 'Application plan superseded by another sync');
+  if ((latest?.id ?? null) === plan.base_sync_id) {
+    assert(!latest || latest.status === 'complete', 'Application plan baseline is no longer complete');
+    assert.equal(latest?.plan_hash ?? null, plan.base_plan_hash, 'Application plan baseline generation changed');
+  }
 }
 export function verifyPlanState(plan, actual, { complete = false, allowLocalChanges = false, baselineOnly = false } = {}) {
   assertPlan(plan);

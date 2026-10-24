@@ -69,8 +69,9 @@ manifest (`src/application-plan.js`) に固定commit、入力/正規化/品質�
 ロック取得後に基準を再確認し、製品書き込み前に計画を保存する。
 forward migration `0011_sync_manifest.sql`はsync_runsへplan_hash/base_sync_idだけを追加する。
 全データ履歴DBや警告テーブルは追加しない。
-Actionsはpin → plan → **計画artifact upload成功** → sync → releaseの順。
-再試行は最初のpin/planをrestoreする。新規週次実行は直近completeの
+Actionsはpin → artifact一覧照会/restore → plan → **新規計画artifact upload成功・取得照合** → sync → releaseの順。
+再試行は最初のpinと、存在する固定planをrestoreする。計画未保存時の例外は下記の厳密な条件だけ。
+新規週次実行は直近completeの
 report_json.artifact_run_idから前計画artifactをread-only取得してhash照合する。
 ローカル保存先は`.cache/application-plans/<hash>.json`。
 
@@ -78,17 +79,33 @@ report_json.artifact_run_idから前計画artifactをread-only取得してhash�
 DB応答喪失後も無条件再送せず適用済み行を除く。partial/failedから正常基準を作らない。
 同一millisecond内の再試行でも、ロック下でsync開始時刻を単調増加させる。UUIDの辞書順で古いrunを最新と誤認しない。
 同じcommitでも別計画/syncに置換された古い実行はsupersededとなる。
-計画/基準artifact喪失時は停止し、部分DBから再構築しない。
+書き込み開始後の計画喪失・基準artifact喪失時は停止し、部分DBから再構築しない。
 通常のローカル補完編集は次の新規計画に取り込めるが、同一計画の再開途中に編集されたら停止する。
 
 ## 削除・品質ガード
 
 削除はacceptedの補集合ではない。完全な存在一覧から消え、カテゴリ保留がなく、
-基準active数に対する全体・カテゴリ別20%削除上限を満たす場合のみ許可する。
+基準active数に対する全体・カテゴリ別`maxDeleteFraction`（既定20%）削除上限を満たす場合のみ許可する。
 全変更の適用が済むまで削除を始めない。削除許可は部分適用後に再計算しない。
 保留行には書き込まず、非active行も勝手に復活させない。
 
-`QUALITY_POLICY`世代1:
+新規計画では、基準を独立ソース/前計画で検証した後、**適用行を確定する前**にカテゴリ別削除率を判定する。
+分母は検証済み基準のカテゴリactive件数、分子はそのactiveキーのうち完全・同一性確認済みGit存在一覧にないキー数。
+存在一覧はキーの集合で重複排除し、上流に存在する隔離製品は削除候補に含めない。
+存在一覧が不完全なら停止し、同一性や証拠が不明なら既存の保留/停止を優先する。
+存在一覧を持たない旧呼び出しから削除率を推測して新判定に使うことはしない（従来の最終保護は残る）。
+
+総件数が100件のままでも30件削除+30件追加なら30%となり、既定上限では
+`category_delete_fraction`理由でカテゴリ全体をheldにする。追加・更新・削除をすべて保留し、
+旧activeのID/raw/spec/出典/ローカル情報を維持、旧inactiveも復活させず、新規製品は公開しない。
+安全な他カテゴリは更新を継続するため、処理`complete`・品質`held`となり得る。
+閾値ちょうどは許可、**超過時だけ**保留。基準active=0なら候補0件・割合0。
+設定値は最終カテゴリ/全体削除assertと共通で、保留反映後の全体ガードも残す。
+品質レポート/計画の`quality.categories.<category>.deletion`には
+`baseline_active`、保留前の`candidates`、`fraction`、`max_delete_fraction`を固定保存する。
+証拠不明時の候補数/割合はnull。保留後の`deletions`が0件でも元の検出数を失わない。
+
+`QUALITY_POLICY`世代2（カテゴリ削除率の事前保留を追加したため。以下の既存閾値は不変）:
 
 - 存在数は従来の80%〜150%（小規模増加は+10まで）を維持。超過はカテゴリ保留。
 - 製品隔離: 全滅、または5件以上かつ10%超。20件以下では20%超も保留。
@@ -104,6 +121,48 @@ screen size/resolution等をprimaryFieldsで明示する。20%は既存削除保
 未使用追加項目/上流Schema診断を隔離率へ加算しない。
 Screen size欠落96/約3,900件は約2.5%で、単独では20%超喪失にならない。
 基準9月21日にもサイズ不明96件があり、Schema必須違反と公開品質の急変を区別する。
+
+世代2は**新規計画だけ**に適用する。計画形式1、入力契約1、正規化世代2は変更しない。
+保存済み世代1計画のhash/内容を変更せず、partialも旧計画の判断のまま再開できる。
+旧complete計画を独立した基準にして新世代計画を作成できる。上流修復後の新計画では保留から通常更新に復帰する。
+今回の修正に追加migration・全件再正規化は不要。
+
+## 計画保存前の失敗と同一実行の再試行
+
+`scripts/lib/plan-artifact.js`をartifact CLIとrelease CLIで共有する。
+workflowは取得・upload・確認・ステップ制御、release CLIはpin/計画/DB基準の安全性を担当する。
+
+|照会結果|処理|
+|---|---|
+|正常な同一実行の固定artifactあり|必ずrestoreし、hash/commit/基準ID/実行情報を照合。再作成・再uploadしない|
+|全ページのAPI照会成功で同名artifactなし|`absent`と記録。下記の未開始確認に通った場合だけ同じpinから新規作成|
+|権限不足/429/5xx/timeout、一覧不整合、期限切れ、重複artifact、download/展開/JSON/hash/commit等不正|`stopped`。未保存扱い・fallback作成・製品書き込みは禁止|
+
+再作成には元の有効pin（同じ`GITHUB_RUN_ID`、固定commit、明示的な`base_sync_id`）が必要。
+moving mainは再解決しない。新pinには基準計画hash/commitも保存し、旧pinは元の基準IDと独立した基準検証を継続する。
+writer lease下で最新syncがpinの基準IDに完全一致し、completeであり、以後のsync開始・running記録や未処理ingestがないことを確認する。
+基準データは前計画、または固定上流ソースと旧正規化器で独立照合する。
+基準ID=nullでは**同期履歴0件かつ製品0件**が必要。基準syncなし・製品ありを初期DBとして扱わない。
+
+既存writerは同じlease下で、最初の製品書き込み**より前**に`sync_runs`開始記録を保存する。
+この順序と排他制御により、基準が未変更なら今回の書き込み未開始を確認できる。
+report_jsonやsync-report.jsonの欠如は証拠にしない。running/partial/failed/今回のcompleteがあれば再作成不可。
+同じcommitでも別sync ID/計画に置換されていれば停止する。
+
+新規作成時はrun_attemptに関係なく、上書き禁止のuploadと、保存した計画の再取得/hash照合に成功してからsyncへ進む。
+upload応答喪失・保存確認失敗ではその試行を停止する。次回に保存済みならrestoreし、APIで未保存と確認した場合だけ再度基準を検証する。
+保存までの待ち時間に基準が変わる可能性があるため、実syncでもlease下で基準・計画・全行状態を再確認する。
+
+復旧操作は、元のpin/計画artifactを削除せず、原因（通信/権限/予算等）を解消して**同じworkflow実行の失敗jobを再試行**すること。
+開始後に計画が失われた場合は同一artifact/バックアップを復元するまで停止し、新計画で置換しない。
+手動SQLで開始記録を消して再作成を許可してはならない。
+
+`.cache/release-plan-artifact.json`に`absent/restored/saved`、理由コード、run ID、基準ID、commit、artifact ID、計画hashを記録する。
+取得失敗は`.cache/release-plan-artifact-report.json`の`stopped`と安全な理由コード
+（`plan_artifact_listing_failed`、`plan_artifact_expired`、`plan_artifact_download_or_validation_failed`等）で区別する。
+release-plan-report.jsonの`plan_recovery`/`reason`は安全確認・upload要否、DB失敗経路を示す。
+CLIのsyncも保存済みreceipt/hashを必須とし、workflow条件だけに依存しない。
+計画本文・製品データ・SQL・認証情報・provider応答本文はログに出さない。
 
 ## 後段検証・状態
 
@@ -132,7 +191,7 @@ manifest/sync-reportには隔離/維持数、カテゴリlast_good_commit/held_s
 
 ```sh
 npm run check
-node --test test/resilient-sync.test.js
+node --test test/resilient-sync.test.js test/release.test.js
 node --max-old-space-size=8192 scripts/validate-upstream-history.js --sync --commits 94ece095c351fbdb4e26d13f63a145bcffd820de,3ff68236937d6b08cb38369921cf053c95d3e4fc,e3e3ef0936cdbe2fce5121c9421efe48e1de4387
 node --max-old-space-size=8192 scripts/verify-application-plan-local.js --directory .cache/resilient-validation
 ```
@@ -144,6 +203,7 @@ node --max-old-space-size=8192 scripts/verify-application-plan-local.js --direct
 別の`--output`で再検証する。後者のcommandは3コミットを再取得し、最新コードの入力hashを
 保存計画と照合してから、最終DBのreadiness・source integrity・query plansを確認する。
 実測結果・変更一覧は[検証報告](resilient-sync-validation.md)を参照。
+今回の削除率/保存前再試行の差分検証は[追加検証報告](resilient-sync-retry-validation.md)を参照。
 
 `verify-search-local.js`はローカル複製に0011まで適用し、旧世代基準が別commitなら
 `--baseline-repo`を要求する。検索/Filter/HTTP/benchmarkの期待集合はmanifestへ統一した。

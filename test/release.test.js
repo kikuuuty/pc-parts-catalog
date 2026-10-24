@@ -12,6 +12,8 @@ import { cacheEpoch, productionConfig, withReleaseLease, assertGolden, readiness
 import { assertDeployedVars } from '../scripts/lib/cloudflare-release.js';
 import { pacedRequests, categorySmokeSamples } from '../scripts/lib/production-smoke.js';
 import { categoryCountBounds, categoryCountDeltaError } from '../scripts/lib/category-count-guard.js';
+import { latestSync, storedCatalog, digest } from '../src/application-plan.js';
+import { restorePlanArtifact, prepareReleasePlan, confirmPlanArtifact, assertSavedPlan, githubPlanAdapter, loadReleaseSnapshot, PLAN_ARTIFACT } from '../scripts/lib/plan-artifact.js';
 
 const commit = 'a'.repeat(40);
 const record = () => normalize('cpu', { opendb_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', metadata: { name: 'AMD Ryzen 7 9800X3D', manufacturer: 'AMD' } }, commit);
@@ -173,4 +175,194 @@ test('smoke samples separate general/Detail from identifiers using validated sou
   assert.deepEqual(categorySmokeSamples({ records: [general] }, 'stand'), { general, identified: null });
   assert.deepEqual(categorySmokeSamples({ records: [general, identified] }, 'stand'), { general, identified });
   assert.throws(() => categorySmokeSamples({ records: [] }, 'stand'), /Missing source API sample/);
+});
+
+// Exercise the exact shared operations used by the artifact CLI, plan CLI,
+// upload step and sync CLI, in workflow order, with an in-memory artifact API
+// and the real local SQLite writer. No GitHub / D1 production access.
+async function planRetryFixture(t,{empty=false}={}) {
+  const db=database();t.after(()=>db.sqlite.close());
+  const baseSnapshot={commit,records:[record()]};
+  const base=empty?null:await syncSnapshot(db,baseSnapshot);
+  const pin={commit:'b'.repeat(40),run_id:'123',base_sync_id:base?.run_id??null,base_plan_hash:base?.plan_hash??null,base_source_commit:base?commit:null};
+  const raw=JSON.parse(record().raw);raw.metadata.name='Updated CPU';
+  const snapshot={commit:pin.commit,records:[normalize('cpu',raw,pin.commit),normalize('cpu',{...raw,opendb_id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'},pin.commit)]};
+  const events=[],refs=[],faults={};let saved,local,receipt,creates=0,uploads=0,writes=0;
+  const tracked={...db,async query(sql,params){
+    if(faults.planRead && sql.startsWith('SELECT p.id,r.raw_json'))throw Error('planning_failed');
+    if(sql.startsWith('INSERT INTO sync_runs'))events.push('record_start');
+    if(/^(INSERT INTO ingest|UPDATE products)/.test(sql)){events.push('product_write');writes++;}
+    return db.query(sql,params);
+  }};
+  const adapter={
+    async list(){events.push('list');if(faults.list)throw Error(faults.list);return saved?[{name:PLAN_ARTIFACT,id:10,expired:Boolean(faults.expired)}]:[];},
+    async download(){events.push('download');if(faults.download)throw Error('download_failed');if(faults.json)return JSON.parse('{broken');return structuredClone(saved);},
+  };
+  const restore=async()=>{const r=await restorePlanArtifact(adapter,pin,'123');receipt=r.receipt;local=r.plan;return r;};
+  const prepare=async()=>{
+    const fixed=await loadReleaseSnapshot(pin,'123',{async fetchUpstream(options){refs.push(options.ref);assert.equal(options.ref,pin.commit);},async loadSnapshot(){return snapshot;}});
+    const result=await prepareReleasePlan({pin,runId:'123',receipt,load:async()=>{events.push('reuse');return local;},async create(){
+      events.push('create');creates++;
+      // Like catalog-release plan: the fixed pin is the ONLY upstream input.
+      const result=await syncSnapshot(tracked,fixed,{prepareOnly:true,recoveryPin:pin,workflowRunId:'123',baseSyncId:pin.base_sync_id});
+      return result.applicationPlan;
+    }});local=result.plan;return result;
+  };
+  const upload=async()=>{events.push('upload');uploads++;assert(!saved,'fixed artifact must not be overwritten');if(faults.upload==='before')throw Error('upload_failed');saved=structuredClone(local);if(faults.upload==='after')throw Error('upload_response_lost');};
+  const confirm=async()=>{events.push('confirm');receipt=await confirmPlanArtifact(adapter,pin,'123',local,receipt);};
+  const sync=async(options={})=>{events.push('sync_gate');assertSavedPlan(local,pin,'123',receipt);return syncSnapshot(tracked,snapshot,{applicationPlan:local,baseSyncId:pin.base_sync_id,reuseComplete:true,...options});};
+  const attempt=async(options)=>{await restore();const decision=await prepare();if(decision.uploadRequired){await upload();await confirm();}return sync(options);};
+  return {db,tracked,pin,snapshot,baseSnapshot,events,refs,faults,adapter,restore,prepare,upload,confirm,sync,attempt,
+    get creates(){return creates;},get uploads(){return uploads;},get writes(){return writes;},get plan(){return local;},get saved(){return saved;},set saved(value){saved=value;},get receipt(){return receipt;}};
+}
+
+test('plan creation failure after saved pin recovers on retry only after verified creation, upload and confirmation',async t=>{
+  const f=await planRetryFixture(t);f.faults.planRead=true;
+  const before=await storedCatalog(f.db);
+  await assert.rejects(f.attempt(),/planning_failed/);assert.equal(f.writes,0);
+  assert.deepEqual(await storedCatalog(f.db),before);assert.equal(f.saved,undefined);
+  assert.equal((await f.db.query('SELECT count(*) n FROM sync_runs')).results[0].n,1);
+  assert.equal((await f.db.query('SELECT count(*) n FROM sync_lock')).results[0].n,0);
+  f.faults.planRead=false;f.events.length=0;
+  const result=await f.attempt();assert.equal(result.status,'complete');assert.equal(result.commit,f.pin.commit);
+  assert.deepEqual(f.events,['list','create','upload','confirm','list','download','sync_gate','record_start','product_write']);
+  assert.equal(f.saved.hash,result.plan_hash);assert.equal(f.saved.workflow_run_id,'123');
+});
+
+test('failed upload blocks products; absent upload recovers, lost response restores without overwrite',async t=>{
+  for(const mode of ['before','after']) {
+    const f=await planRetryFixture(t);f.faults.upload=mode;
+    await assert.rejects(f.attempt(),/upload_/);assert.equal(f.writes,0);
+    assert.equal((await latestSync(f.db)).id,f.pin.base_sync_id);
+    const hash=f.saved?.hash;f.faults.upload=null;f.events.length=0;
+    assert.equal((await f.attempt()).status,'complete');
+    assert.equal(f.creates,mode==='before'?2:1);assert.equal(f.uploads,mode==='before'?2:1);
+    if(hash){assert.equal(f.saved.hash,hash);assert.deepEqual(f.events.slice(0,4),['list','download','reuse','sync_gate']);}
+  }
+});
+
+test('save confirmation failures and an unconfirmed local plan cannot start product writes',async t=>{
+  const f=await planRetryFixture(t);await f.restore();await f.prepare();
+  await assert.rejects(f.sync(),/save_unconfirmed/);await assert.rejects(f.confirm(),/save_unconfirmed/);
+  await f.upload();f.faults.list='timeout';
+  await assert.rejects(f.confirm(),/timeout/);await assert.rejects(f.sync(),/save_unconfirmed/);assert.equal(f.writes,0);
+  f.faults.list=null;assert.equal((await f.attempt()).status,'complete');assert.equal(f.uploads,1);assert.equal(f.creates,1);
+});
+
+test('saved plan retains commit/hash through partial resume and complete reuse without creation or upload',async t=>{
+  const f=await planRetryFixture(t);assert.equal((await f.attempt({maxProducts:1})).status,'partial');
+  const hash=f.saved.hash;
+  assert.equal((await f.attempt()).status,'complete');const writes=f.writes;
+  assert((await f.attempt()).reused);assert.equal(f.writes,writes);
+  assert.equal(f.saved.hash,hash);assert.equal(f.saved.commit,f.pin.commit);assert.equal(f.creates,1);assert.equal(f.uploads,1);
+  assert.deepEqual(f.refs,[f.pin.commit,f.pin.commit,f.pin.commit]);
+});
+
+test('lost artifact after any started run (running/partial/failed/complete) cannot be recreated',async t=>{
+  for(const status of ['running','partial','failed','complete']){
+    const f=await planRetryFixture(t);await f.attempt(status==='complete'?{}:{maxProducts:1});
+    await f.db.query('UPDATE sync_runs SET status=?,report_json=NULL WHERE id=?',[status,(await latestSync(f.db)).id]);
+    f.db.sqlite.exec("INSERT INTO local_enrichments(product_id,namespace,key,value_json,evidence) VALUES(1,'spec','note','true','checked')");
+    const before=await storedCatalog(f.db),writes=f.writes;f.saved=undefined;
+    await assert.rejects(f.attempt(),/base_changed|superseded/);assert.equal(f.writes,writes);
+    assert.deepEqual(await storedCatalog(f.db),before);
+    assert.equal(f.uploads,1); // no replacement upload
+  }
+});
+
+test('missing plan cannot turn partial/failed/running base into a healthy baseline',async t=>{
+  for(const status of ['running','partial','failed']){
+    const f=await planRetryFixture(t);
+    await f.db.query('UPDATE sync_runs SET status=?',[status]);
+    await assert.rejects(f.attempt(),/base_not_complete/);assert.equal(f.writes,0);assert.equal(f.uploads,0);
+  }
+});
+
+test('same-commit replacement before planning or after upload is superseded under the writer lease',async t=>{
+  for(const phase of ['before_plan','after_upload']){
+    const f=await planRetryFixture(t);
+    if(phase==='after_upload'){await f.restore();await f.prepare();await f.upload();await f.confirm();}
+    // A different sync ID/plan replaces the base, despite identical commit.
+    await syncSnapshot(f.db,f.baseSnapshot);
+    const before=await storedCatalog(f.db);
+    await assert.rejects(phase==='before_plan'?f.attempt():f.sync(),/base_changed|superseded/);
+    assert.equal(f.writes,0);assert.deepEqual(await storedCatalog(f.db),before);
+  }
+  const f=await planRetryFixture(t);await f.db.query("UPDATE sync_runs SET plan_hash=?",['f'.repeat(64)]);
+  await assert.rejects(f.attempt(),/base_plan_changed/);assert.equal(f.writes,0);
+  for(const status of ['partial','complete']){
+    const changed=await planRetryFixture(t);await changed.restore();await changed.prepare();await changed.upload();await changed.confirm();
+    await changed.db.query('UPDATE sync_runs SET status=?,plan_hash=?',[status,status==='complete'?'f'.repeat(64):changed.pin.base_plan_hash]);
+    await assert.rejects(changed.sync(),/no longer complete|generation changed/);assert.equal(changed.writes,0);
+  }
+});
+
+test('only a valid same-run pin and genuinely empty initial DB permit initial plan creation',async t=>{
+  const empty=await planRetryFixture(t,{empty:true});assert.equal((await empty.attempt()).status,'complete');
+  const orphan=await planRetryFixture(t);orphan.db.sqlite.exec('DELETE FROM sync_runs');
+  Object.assign(orphan.pin,{base_sync_id:null,base_plan_hash:null,base_source_commit:null});
+  await assert.rejects(orphan.attempt(),/initial_products_exist/);assert.equal(orphan.writes,0);
+  const initial=await planRetryFixture(t,{empty:true});initial.pin.run_id='other';
+  await assert.rejects(initial.attempt(),/pin_run_mismatch/);assert.equal(initial.creates,0);
+  await assert.rejects(restorePlanArtifact(initial.adapter,null,'123'),/pin_missing/);
+  delete initial.pin.base_sync_id;initial.pin.run_id='123';
+  await assert.rejects(initial.attempt(),/pin_invalid_base/);assert.equal(initial.writes,0);
+});
+
+test('artifact retrieval, expiration and plan integrity errors fail closed without creating a plan',async t=>{
+  for(const failure of ['403','429','500','timeout']){
+    const f=await planRetryFixture(t);f.faults.list=failure;
+    await assert.rejects(f.attempt(),new RegExp(failure));assert.equal(f.creates,0);assert.equal(f.writes,0);
+  }
+  for(const failure of ['download','json','expired','hash','commit','run','base']){
+    const f=await planRetryFixture(t);await f.restore();await f.prepare();await f.upload();
+    if(['download','json','expired'].includes(failure))f.faults[failure]=true;
+    else if(failure==='hash')f.saved.rows[0].active=0;
+    else {
+      const {hash,...body}=f.saved;
+      body[failure==='commit'?'commit':failure==='run'?'workflow_run_id':'base_sync_id']='wrong';
+      f.saved={...body,hash:digest(body)};
+    }
+    await assert.rejects(f.attempt());assert.equal(f.creates,1);assert.equal(f.writes,0);assert.equal(f.uploads,1);
+  }
+});
+
+test('matching baseline ID does not excuse corruption or foreign lease during missing-artifact recovery',async t=>{
+  const f=await planRetryFixture(t);f.db.sqlite.exec("UPDATE cpu SET socket='corrupt' WHERE product_id=1");
+  await assert.rejects(f.attempt(),/fixed baseline|Baseline source integrity/);assert.equal(f.writes,0);assert.equal(f.uploads,0);
+  const leased=await planRetryFixture(t);await leased.db.query("INSERT INTO sync_lock VALUES(1,'foreign',unixepoch()+900)");
+  await assert.rejects(leased.attempt(),/lease/);assert.equal(leased.writes,0);
+});
+
+test('real GitHub adapter never treats HTTP/transport/JSON/download failures as an empty artifact list',async()=>{
+  const options={repository:'kikuuuty/pc-parts-catalog',runId:'123',download:async()=>{throw Error('private download detail');}};
+  for(const status of [401,403,429,500,503]){
+    const adapter=githubPlanAdapter({...options,request:async()=>new Response('{}',{status})});
+    await assert.rejects(adapter.list(),/^Error: plan_artifact_listing_failed$/);
+  }
+  for(const request of [async()=>{throw Error('timeout with secret');},async()=>new Response('{broken'),async()=>new Response('{}')]){
+    await assert.rejects(githubPlanAdapter({...options,request}).list(),/plan_artifact_listing_failed/);
+  }
+  let pages=0;
+  const adapter=githubPlanAdapter({...options,request:async()=>{pages++;return Response.json({total_count:101,artifacts:Array.from({length:pages===1?100:1},(_,i)=>({id:(pages-1)*100+i,name:'other',expired:false}))});}});
+  assert.equal((await adapter.list()).length,101);assert.equal(pages,2);
+  await assert.rejects(adapter.download({id:1}),/^Error: plan_artifact_download_or_validation_failed$/);
+  const malformed=githubPlanAdapter({...options,request:async()=>Response.json({total_count:1,artifacts:[]})});
+  await assert.rejects(malformed.list(),/listing_inconsistent/);
+  for(const fault of ['changed_total','repeated_id']){
+    let page=0;
+    const uncertain=githubPlanAdapter({...options,request:async()=>{page++;return Response.json({total_count:page===2&&fault==='changed_total'?100:101,artifacts:page===1?Array.from({length:100},(_,id)=>({id,name:'other',expired:false})):[{id:0,name:'other',expired:false}]});}});
+    await assert.rejects(uncertain.list(),/listing_inconsistent/);
+  }
+});
+
+test('workflow and CLI connect discovery, conditional upload on every attempt, confirmation and guarded sync',async()=>{
+  const workflow=await readFile('.github/workflows/sync.yml','utf8'),cli=await readFile('scripts/catalog-release.js','utf8');
+  assert(workflow.includes('node scripts/catalog-plan-artifact.js restore'));
+  assert(workflow.includes("if: steps.plan.outputs.upload_required == 'true'"));
+  assert(workflow.includes('overwrite: false'));assert(!workflow.includes('continue-on-error'));
+  assert(cli.includes('prepareReleasePlan('));assert(cli.includes('assertSavedPlan('));
+  assert(!cli.includes('if (!prepareOnly || Number(process.env.GITHUB_RUN_ATTEMPT'));
+  // Behavioral coverage of these same shared operations is above, not just
+  // string matching the YAML. The workflow remains the upload step owner.
 });

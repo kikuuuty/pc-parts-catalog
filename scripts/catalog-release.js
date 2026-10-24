@@ -14,6 +14,7 @@ import { verifyProduction } from './lib/production-smoke.js';
 import { saveValidationReport } from './lib/validation-report.js';
 import { readPlan, planForSync, publishedSnapshot, latestSync, savePlan, PLAN_DIRECTORY } from '../src/application-plan.js';
 import path from 'node:path';
+import { assertReleasePin, prepareReleasePlan, assertSavedPlan, loadReleaseSnapshot } from './lib/plan-artifact.js';
 
 const { positionals: [command], values: args } = parseArgs({ allowPositionals: true, options: {
   local: { type: 'boolean', default: false },
@@ -60,7 +61,7 @@ async function pin() {
     // download-artifact must restore the immutable first-attempt pin. Fail
     // closed if unavailable; never silently resolve a moving main on retry.
     value = JSON.parse(await readFile(pinFile, 'utf8'));
-    assert.equal(value.run_id, process.env.GITHUB_RUN_ID);
+    assertReleasePin(value, process.env.GITHUB_RUN_ID);
   } else {
     const config = productionConfig(JSON.parse(await readFile('wrangler.json', 'utf8')));
     // Catch missing Worker management access before mutating the catalog.
@@ -70,39 +71,52 @@ async function pin() {
     try { await migrationGate(db); base = await catalogState(db); }
     finally { await db.close(); }
     const commit = await fetchUpstream({ ref: process.env.UPSTREAM_REF || 'main' });
-    value = { commit, run_id: process.env.GITHUB_RUN_ID ?? 'manual', base_sync_id: base?.id ?? null };
+    value = { commit, run_id: process.env.GITHUB_RUN_ID ?? 'manual', base_sync_id: base?.id ?? null,
+      base_plan_hash: base?.plan_hash ?? null, base_source_commit: base?.source_commit ?? null };
     await writeFile(pinFile, JSON.stringify(value) + '\n');
   }
-  assert.match(value.commit, /^[a-f0-9]{40}$/);
+  assertReleasePin(value, process.env.GITHUB_RUN_ID ?? 'manual');
   if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `commit=${value.commit}\n`);
 }
 
 async function sync(db, prepareOnly = false) {
   const pinned = JSON.parse(await readFile(pinFile, 'utf8'));
-  assert.match(pinned.commit, /^[a-f0-9]{40}$/);
+  const runId = process.env.GITHUB_RUN_ID ?? 'manual';
+  assertReleasePin(pinned, runId);
+  // This receipt is issued only by successful run-scoped artifact enumeration /
+  // restoration, not inferred from a missing local file or report.
+  const receipt = JSON.parse(await readFile('.cache/release-plan-artifact.json', 'utf8'));
   stage('validate snapshot');
   report.validation.input_contract = 'running';
-  await fetchUpstream({ ref: pinned.commit });
-  const snapshot = await loadSnapshot();
-  assert.equal(snapshot.commit, pinned.commit);
+  const snapshot = await loadReleaseSnapshot(pinned, runId, { fetchUpstream, loadSnapshot });
   report.validation.input_contract = 'passed';
   report.diagnostics = snapshot.report.diagnostics;
   await migrationGate(db);
   const maxProducts = positive(process.env.MAX_PRODUCTS, 10000);
   const writeBudget = positive(process.env.WRITE_BUDGET, 2000000);
   let applicationPlan;
-  if (!prepareOnly || Number(process.env.GITHUB_RUN_ATTEMPT ?? 1) > 1) applicationPlan = await readPlan(planFile);
   if (prepareOnly) {
+    report.plan_recovery = { artifact_state: receipt.state, reason: receipt.state === 'absent' ? 'plan_verifying_unstarted_base' : 'plan_verifying_saved_plan', upload_required: null };
     report.validation.application_plan = 'running';
     stage('freeze application plan');
-    const evidence = applicationPlan ? {} : await baselineEvidence(db);
-    const prepared = await syncSnapshot(db, snapshot, { prepareOnly: true, applicationPlan, planFile, baseSyncId: pinned.base_sync_id, ...evidence });
+    let prepared;
+    const decision = await prepareReleasePlan({ pin: pinned, runId, receipt, load: () => readPlan(planFile), async create() {
+      const evidence = await baselineEvidence(db);
+      prepared = await syncSnapshot(db, snapshot, { prepareOnly: true, planFile, baseSyncId: pinned.base_sync_id, recoveryPin: pinned, workflowRunId: runId, ...evidence });
+      return prepared.applicationPlan;
+    } });
+    if (!prepared) prepared = await syncSnapshot(db, snapshot, { prepareOnly: true, applicationPlan: decision.plan, planFile, baseSyncId: pinned.base_sync_id });
     const total = Object.values(prepared.expected_counts).reduce((a,b) => a+b, 0);
     assert(total >= 20000 && total <= 100000, 'Planned publication outside reviewed envelope');
     Object.assign(report, { plan_hash: prepared.plan_hash, snapshot_commit: pinned.commit, expected_counts: prepared.expected_counts, quality: prepared.quality, retained: prepared.retained, quarantined: prepared.quarantined });
     report.validation.application_plan = 'passed';
+    report.plan_recovery = { artifact_state: receipt.state, reason: decision.reason, upload_required: decision.uploadRequired };
+    if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `upload_required=${decision.uploadRequired}\nplan_ready=true\n`);
     return;
   }
+  applicationPlan = await readPlan(planFile);
+  assertSavedPlan(applicationPlan, pinned, runId, receipt);
+  report.plan_recovery = { artifact_state: receipt.state, reason: receipt.reason, plan_hash: applicationPlan.hash };
   const counts = applicationPlan.counts;
   const total = Object.values(counts).reduce((a,b) => a+b, 0);
   assert(total >= 20000 && total <= 100000, 'Planned publication outside reviewed envelope');

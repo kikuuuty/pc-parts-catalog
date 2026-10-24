@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { NORMALIZER_VERSION } from './model.js';
 import { readState } from './database.js';
-import { makeApplicationPlan, savePlan, planForSync, latestSync, storedCatalog, assertPlan, assertPlanBase, verifyPlanState, snapshotDigest } from './application-plan.js';
+import { makeApplicationPlan, savePlan, planForSync, latestSync, storedCatalog, assertPlan, assertPlanBase, verifyPlanState, snapshotDigest, assertUnstartedBase } from './application-plan.js';
+import { DEFAULT_MAX_DELETE_FRACTION } from './quality/ingestion.js';
 import { ftsIntegrity } from '../scripts/lib/fts-integrity.js';
 
 export function planSync(snapshot, state) {
@@ -24,7 +25,7 @@ export function ingestionStatement(records, owner) {
   };
 }
 
-export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, writeBudget = Infinity, dryRun = false, maxDeleteFraction = 0.2, reuseComplete = false, baseSyncId, applicationPlan, prepareOnly = false, planFile, baselineSource } = {}) {
+export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, writeBudget = Infinity, dryRun = false, maxDeleteFraction = DEFAULT_MAX_DELETE_FRACTION, reuseComplete = false, baseSyncId, applicationPlan, prepareOnly = false, planFile, baselineSource, recoveryPin, workflowRunId } = {}) {
   const owner = randomUUID();
   let acquired = false;
   let started = false;
@@ -46,9 +47,13 @@ export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, write
     }
     const locked = { ...db, releaseOwner: owner, query: async (sql, params) => count(await db.query(sql, params)) };
     const latest = await latestSync(locked);
+    if (recoveryPin) {
+      if (!prepareOnly || dryRun || applicationPlan) throw new Error('plan_recovery_invalid_mode');
+      await assertUnstartedBase(locked, latest, recoveryPin);
+    }
     if (baseSyncId !== undefined && (latest?.id ?? null) !== baseSyncId && !(applicationPlan && latest?.plan_hash === applicationPlan.hash)) throw new Error('Pinned sync superseded by a different application plan');
     let manifest = applicationPlan;
-    if (!manifest && latest?.plan_hash && (latest.status !== 'complete' || reuseComplete && latest.source_commit === snapshot.commit)) {
+    if (!manifest && !recoveryPin && latest?.plan_hash && (latest.status !== 'complete' || reuseComplete && latest.source_commit === snapshot.commit)) {
       const saved = await planForSync(latest, planFile);
       if (latest.status !== 'complete' || saved.input_hash === snapshotDigest(snapshot)) manifest = saved;
     }
@@ -59,7 +64,7 @@ export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, write
       verifyPlanState(manifest, actual, { baselineOnly: latest?.plan_hash !== manifest.hash });
     } else {
       const baselinePlan = latest?.plan_hash ? await planForSync(latest) : null;
-      manifest = makeApplicationPlan(snapshot, actual, latest, { maxDeleteFraction, baselineSource, baselinePlan });
+      manifest = makeApplicationPlan(snapshot, actual, latest, { maxDeleteFraction, baselineSource, baselinePlan, workflowRunId });
     }
     if (!dryRun) {
       await savePlan(manifest);

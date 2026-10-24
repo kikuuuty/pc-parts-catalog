@@ -149,6 +149,78 @@ snapshot; there is no claim of atomic whole-catalog publication. Keep manual SQL
 migrations and enrichment writes outside the release window. Product-level
 ingestion and category moves remain atomic.
 
+### Retry before plan persistence
+
+The workflow now explicitly discovers artifacts on **every attempt**, using
+`node scripts/catalog-plan-artifact.js restore`. Only successful, consistent
+enumeration of all run-scoped artifact pages can yield `absent`. Permission
+errors, 429, 5xx, timeouts, expired/ambiguous artifacts, download/extraction
+failures and invalid JSON/hash/commit/run/base identity stop the release; they
+are never treated as an unsaved plan. `continue-on-error` is not used.
+
+* **Reuse:** an existing valid plan is restored and validated without changing
+  its hash, policy decisions or pinned commit. It is not uploaded again.
+* **Create:** an explicitly absent artifact allows the plan CLI to attempt
+  recovery with the original same-run pin. Under the writer lease, latest sync
+  must equal `pin.base_sync_id`, be complete, and have no subsequent start or
+  running writer/unfinished ingest. New pins also bind base plan hash/commit.
+  The entire baseline must independently match its previous plan or fixed
+  upstream source. With a null base, both sync history and products must be
+  empty. No moving-main resolution occurs.
+* **Stop:** missing/foreign pin, uncertain retrieval, changed/corrupt baseline,
+  or any start of the target sync (running/partial/failed/complete). Even the
+  same source commit with a different sync ID/plan is superseded. Missing
+  report files/`report_json` are not evidence of no product writes.
+
+`sync_runs` is inserted under writer exclusion **before the first product
+write**. The recovery check relies on this order, not on optional reports.
+`scripts/lib/plan-artifact.js` is shared by the workflow artifact CLI and
+release CLI. `plan` emits `upload_required` only after its DB checks. Any newly
+created plan, including attempt 2+, must be uploaded with `overwrite: false`;
+the `confirm` command then re-downloads and matches its hash. Only a restored
+or confirmed-saved receipt permits the sync CLI and workflow to proceed.
+Sync rechecks base/plan/rows under its own lease after the upload interval.
+
+If upload fails or its response is lost, that attempt never starts product
+writes. Retry the **failed job of the same workflow run**, preserving artifacts.
+A plan saved server-side is restored on retry without overwrite; a genuinely
+unsaved plan can be rebuilt only after the complete unstarted-base checks.
+After writes start, recover the exact original plan from an artifact/backup;
+never regenerate it from the changed DB or delete sync history to bypass guards.
+Fix retrieval/permission problems before retrying. Expired artifacts fail closed.
+
+Safe diagnostics are in `.cache/release-plan-artifact.json`
+(`absent/restored/saved`, reason, run/base IDs, commit, artifact ID, plan hash),
+`release-plan-artifact-report.json` (`stopped`, phase/reason on retrieval failure),
+and `release-plan-report.json` (`plan_recovery`, validation/reason). They contain
+no plan body, credentials or provider response bodies. All are included in the
+existing summary artifact glob. See [local regression results](resilient-sync-retry-validation.md).
+
+### Category deletion holds
+
+New plans compute category deletion candidates before choosing application
+rows, from the **verified active baseline minus the complete upstream presence
+key set**, not accepted records. Quarantined-but-present keys do not count;
+duplicate presence entries cannot inflate counts. Strictly exceeding the same
+`maxDeleteFraction` used by the final deletion guards holds that whole category
+(`category_delete_fraction`), even if total count is unchanged by replacement.
+The exact threshold is permitted; an empty active base has zero candidates/rate.
+
+Held categories preserve old active/inactive rows, IDs, raw, provenance and local
+data, suppress new products and perform no update/deletion/reactivation. Other
+independently safe categories continue, including partial/resume. The final
+global deletion guard and all downstream integrity/Filter/search gates remain.
+`quality.categories.<category>.deletion` preserves baseline active count,
+pre-hold candidates, rate and threshold even when actual planned deletions are 0.
+The decision is fixed in the plan, never recalculated from a partial DB.
+
+Quality policy generation is now 2 for this pre-application category hold.
+Plan format 1, input contract 1 and normalizer generation 2 are unchanged.
+Saved policy-1 plans are read/resumed unchanged, including hashes, and can serve
+as baselines for new plans. No additional migration or mass renormalization is
+required by this correction. A safe subsequent snapshot can release the hold
+without changing retained product IDs.
+
 ## Incremental snapshot provenance and diagnostics
 
 `products.source_commit` is the upstream commit at the **last update of that row**.

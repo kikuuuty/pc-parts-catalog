@@ -67,16 +67,14 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
-      - name: Restore immutable application plan on retry
-        if: github.run_attempt > 1
-        uses: actions/download-artifact@v4
-        with:
-          name: catalog-application-plan
-          path: .cache
+      - name: Discover and restore immutable application plan (fail closed on retrieval errors)
+        id: plan_artifact
+        run: node scripts/catalog-plan-artifact.js restore
       - name: Validate baseline and freeze application plan
+        id: plan
         run: node scripts/catalog-release.js plan
       - name: Persist application plan before product writes
-        if: github.run_attempt == 1
+        if: steps.plan.outputs.upload_required == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: catalog-application-plan
@@ -84,9 +82,16 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
+          overwrite: false
+      - name: Confirm immutable plan was saved before product writes
+        id: plan_saved
+        if: steps.plan.outputs.upload_required == 'true'
+        run: node scripts/catalog-plan-artifact.js confirm
       - name: Production sync and completion verification
+        if: success() && steps.plan.outputs.plan_ready == 'true' && (steps.plan_artifact.outputs.state == 'restored' || steps.plan_saved.outputs.state == 'saved')
         run: npm run release:sync
       - name: Readiness, source integrity, Filter metadata, Golden, deploy and HTTP smoke
+        if: success() && steps.plan.outputs.plan_ready == 'true' && (steps.plan_artifact.outputs.state == 'restored' || steps.plan_saved.outputs.state == 'saved')
         # One process holds the D1 writer-exclusion lease across ALL these
         # phases. Shared Filter verification uses this same DB/lease before deploy;
         # production smoke includes all 30 Filter endpoints. Named states also

@@ -1,9 +1,11 @@
-import { categories } from '../model.js';
+import { categories, models } from '../model.js';
+import { UUID } from '../input-contract.js';
 import { categoryCountDeltaError } from '../../scripts/lib/category-count-guard.js';
 
 // Broad failure signals, separate from schema diagnostics. Thresholds are
 // reviewed policy, not per-product exceptions. See docs/resilient-sync.md.
-export const QUALITY_POLICY = { version: 1, quarantineFraction: .1, quarantineCount: 5, fieldLossFraction: .2, fieldLossCount: 20, initialMissingFraction: .5, smallCategory: 20 };
+export const DEFAULT_MAX_DELETE_FRACTION = .2;
+export const QUALITY_POLICY = { version: 2, quarantineFraction: .1, quarantineCount: 5, fieldLossFraction: .2, fieldLossCount: 20, initialMissingFraction: .5, smallCategory: 20 };
 export const primaryFields = {
   cpu: ['socket', 'core_count'], memory: ['ram_type', 'capacity_gb'], motherboard: ['socket', 'ram_type'],
   gpu: ['chipset', 'vram_gb'], storage: ['capacity_gb'], psu: ['wattage'], case: ['form_factor'],
@@ -13,17 +15,29 @@ export const primaryFields = {
 // These fields have stable broad coverage in the reviewed normal snapshot.
 // Sparse peripheral specs (e.g. Mouse.shape) use baseline deltas, not a floor.
 const initialCategories = new Set(['cpu','memory','motherboard','gpu','storage','psu','case','case_fan','cpu_cooler','monitor','webcam']);
-export function ingestionQuality(snapshot, baseline, previous = {}) {
+export function ingestionQuality(snapshot, baseline, previous = {}, { maxDeleteFraction = DEFAULT_MAX_DELETE_FRACTION } = {}) {
   const held = structuredClone(snapshot.heldCategories ?? {}), stats = {};
   const observed = snapshot.presence !== undefined;
   for (const category of categories) {
     const before = baseline.filter(r => r.active && r.record.product.category === category).map(r => r.record);
     const accepted = snapshot.records.filter(r => r.product.category === category);
-    const present = snapshot.presence?.filter(r => r.category === category).length ?? accepted.length;
+    const inventory = snapshot.presence?.filter(r => r.category === category);
+    const keys = new Set(inventory?.map(r => r.upstream_key));
+    const present = inventory ? keys.size : accepted.length;
     const quarantined = snapshot.quarantined?.filter(r => r.category === category).length ?? 0;
     const hold = reason => { if (!(held[category] ??= []).includes(reason)) held[category].push(reason); };
     const byKey = new Map(before.map(r => [r.product.upstream_key, r]));
     const fields = {};
+    // Absence is evidence only in a complete, unambiguous inventory, never in
+    // the accepted subset. Duplicate observations cannot inflate the counts.
+    const identityUncertain = held[category]?.some(reason => ['ambiguous_identity','identity_collision','unsupported_layout','ambiguous_inventory'].includes(reason));
+    const trusted = observed && snapshot.complete === true && !identityUncertain && inventory.every(r =>
+      r.evidence === 'complete_git_tree_uuid_filename' &&
+      r.upstream_key?.startsWith(`${models[category].upstream}/`) && UUID.test(r.upstream_key.slice(models[category].upstream.length + 1)));
+    if (observed && !trusted && !held[category]?.length) hold('ambiguous_inventory');
+    const candidates = trusted ? before.filter(r => !keys.has(r.product.upstream_key)).length : null;
+    const fraction = candidates === null ? null : before.length ? candidates / before.length : 0;
+    if (fraction !== null && fraction > maxDeleteFraction) hold('category_delete_fraction');
     if (observed && before.length && categoryCountDeltaError(category, before.length, present)) hold('category_count_delta');
     if (observed && quarantined && (quarantined === present || quarantined >= QUALITY_POLICY.quarantineCount && quarantined / present > QUALITY_POLICY.quarantineFraction || present <= QUALITY_POLICY.smallCategory && quarantined / present > QUALITY_POLICY.fieldLossFraction)) hold('quarantine_rate');
     const metrics = [...(primaryFields[category] ?? []).map(field => [field, r => r.spec[field] != null]),
@@ -45,6 +59,7 @@ export function ingestionQuality(snapshot, baseline, previous = {}) {
     if (observed && lostIds > 0 && lostIds / priorIds > QUALITY_POLICY.fieldLossFraction && (lostIds >= QUALITY_POLICY.fieldLossCount || before.length <= QUALITY_POLICY.smallCategory && lostIds === priorIds)) hold('identifier_element_loss');
     const old = previous[category];
     stats[category] = { presence: present, accepted: accepted.length, quarantined, retained: 0, previous_active: before.length,
+      deletion: { baseline_active: before.length, candidates, fraction, max_delete_fraction: maxDeleteFraction },
       fields, invalid_to_unknown: snapshot.report?.categories?.[category]?.invalid_to_unknown ?? 0,
       identifiers: accepted.reduce((n,r) => n + r.identifiers.length, 0),
       previous_identifiers: before.reduce((n,r) => n + r.identifiers.length, 0),

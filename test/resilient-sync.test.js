@@ -10,7 +10,7 @@ import { InputIssue } from '../src/input-contract.js';
 import { diagnostics } from '../src/diagnostics.js';
 import { loadSnapshot, UPSTREAM_URL } from '../src/upstream.js';
 import { syncSnapshot, ingestionStatement } from '../src/sync.js';
-import { planForSync, latestSync, publishedSnapshot, readPlan, PLAN_DIRECTORY, recordDigest } from '../src/application-plan.js';
+import { planForSync, latestSync, publishedSnapshot, readPlan, PLAN_DIRECTORY, recordDigest, storedCatalog, digest, savePlan } from '../src/application-plan.js';
 import { loadQualityCatalog } from '../src/quality/catalog.js';
 import { verifySourceCatalog } from '../src/quality/integrity.js';
 import { ingestionQuality } from '../src/quality/ingestion.js';
@@ -197,6 +197,124 @@ test('mass spec loss holds a category while a separate category adds and updates
   assert(result.quality.held.monitor.includes('coverage_loss:screen_size_inches'));
   assert.equal(db.sqlite.prepare("SELECT count(*) n FROM products WHERE category='monitor' AND source_commit=?").get(A).n,40);
   assert((await verifySourceCatalog(db,await loadQualityCatalog(db),await currentPublication(db))).pass);
+});
+
+test('constant-count 30% replacement holds only its category across partial/resume, then recovers in a new plan', async t => {
+  const db=database();t.after(()=>db.sqlite.close());
+  const mice=entries(2,'mouse',500).map(e=>({...e,data:{...e.data,shape:'Ergonomic'}}));
+  await syncSnapshot(db,observed('d'.repeat(40),[...entries(101),...mice]));
+  await syncSnapshot(db,observed(A,[...entries(100),...mice])); // one inactive row
+  db.sqlite.exec("INSERT INTO local_identifiers(product_id,type,value,value_key,evidence) VALUES(1,'jan','0491234567890','0491234567890','package'); INSERT INTO local_enrichments(product_id,namespace,key,value_json,evidence) VALUES(1,'spec','note','true','checked')");
+  const old=(await storedCatalog(db)).filter(r=>r.record.product.category==='monitor');
+  const products=db.sqlite.prepare("SELECT * FROM products WHERE category='monitor' ORDER BY id").all();
+  const local=db.sqlite.prepare('SELECT * FROM local_identifiers').all(), enrich=db.sqlite.prepare('SELECT * FROM local_enrichments').all();
+  const inputs=[...entries(70,'monitor',30),...entries(30,'monitor',1000),...structuredClone(mice)];
+  inputs.at(-1).data.metadata.name='Updated mouse';inputs.push({category:'mouse',data:raw(600,{shape:'Ergonomic'})});
+  // Even a valid incoming inactive row must not be reactivated in a held category.
+  const snapshot=observed(B,inputs);
+  const {applicationPlan:plan}=await syncSnapshot(db,snapshot,{prepareOnly:true});
+  const stats=plan.quality.categories.monitor;
+  assert.deepEqual(stats.reasons,['category_delete_fraction']);
+  assert.deepEqual(stats.deletion,{baseline_active:100,candidates:30,fraction:.3,max_delete_fraction:.2});
+  assert.equal(stats.presence,100);assert.equal(stats.published,100);assert.equal(plan.deletions.length,0);
+  assert.equal(plan.rows.filter(r=>r.mode==='retained').length,101);
+  const first=await syncSnapshot(db,snapshot,{applicationPlan:plan,maxProducts:1});
+  assert.equal(first.status,'partial');assert.equal(first.updated,1);assert.equal(first.deleted,0);
+  const budget=await syncSnapshot(db,snapshot,{applicationPlan:plan,writeBudget:1});assert.equal(budget.status,'partial');
+  const resumed=await syncSnapshot(db,snapshot,{applicationPlan:plan});
+  assert.equal(resumed.status,'complete');assert.equal(resumed.added,1);assert.equal(resumed.quality.status,'held');
+  assert.deepEqual(resumed.quality,plan.quality);
+  assert.deepEqual((await storedCatalog(db)).filter(r=>r.record.product.category==='monitor'),old);
+  assert.deepEqual(db.sqlite.prepare("SELECT * FROM products WHERE category='monitor' ORDER BY id").all(),products);
+  assert.deepEqual(db.sqlite.prepare('SELECT * FROM local_identifiers').all(),local);
+  assert.deepEqual(db.sqlite.prepare('SELECT * FROM local_enrichments').all(),enrich);
+  assert.equal(db.sqlite.prepare("SELECT count(*) n FROM products WHERE upstream_id>=? AND category='monitor'").get(uuid(1001)).n,0);
+  const publication=await currentPublication(db),catalog=await loadQualityCatalog(db);
+  assert.equal(catalog.metadata.active_product_count,Object.values(plan.counts).reduce((a,b)=>a+b,0));
+  assert((await verifySourceCatalog(db,catalog,publication)).pass);assert((await ftsIntegrity(db)).pass);
+  assert((await verifyFilterMetadata(db,{snapshot:publication})).pass);
+  const ux=await evaluateUX(db,catalog,[{id:'held',category:'monitor',intent:'filter_only',search:{ranges:{screen_size_inches:{min:20}}}}],{source:sourceCatalog(publication,catalog),operations:false});
+  assert(ux.results[0].exact_set_equality);assert.equal(ux.results[0].relevant_count,100);
+  let productWrites=0;
+  const tracked={...db,async query(sql,params){if (/^(INSERT INTO ingest|UPDATE products)/.test(sql))productWrites++;return db.query(sql,params);}};
+  assert((await syncSnapshot(tracked,snapshot,{applicationPlan:plan,reuseComplete:true})).reused);assert.equal(productWrites,0);
+  const recoveredInputs=[...entries(100),...inputs.filter(e=>e.category==='mouse')];recoveredInputs[0].data.refresh_rate=240;
+  const recovered=await syncSnapshot(db,observed(C,recoveredInputs));
+  assert(!recovered.quality.held.monitor);assert.equal(recovered.updated,1);
+  assert.equal(db.sqlite.prepare('SELECT id FROM products WHERE upstream_id=?').get(uuid(1)).id,1);
+  assert.equal(db.sqlite.prepare('SELECT active FROM products WHERE upstream_id=?').get(uuid(101)).active,0);
+});
+
+test('deletion holds use the configured strict boundary, unique inventory, and a zero-active baseline', async t => {
+  for (const [removed,threshold,held] of [[20,.2,false],[21,.2,true],[30,.3,false],[31,.3,true]]) {
+    const db=database();t.after(()=>db.sqlite.close());await syncSnapshot(db,observed(A,entries(100)));
+    const snapshot=observed(B,[...entries(100-removed,'monitor',removed),...entries(removed,'monitor',1000)]);
+    snapshot.presence.push(...snapshot.presence); // duplicate evidence is a set
+    const {applicationPlan:plan}=await syncSnapshot(db,snapshot,{prepareOnly:true,maxDeleteFraction:threshold});
+    assert.equal(Boolean(plan.quality.held.monitor?.includes('category_delete_fraction')),held);
+    assert.equal(plan.quality.categories.monitor.presence,100);
+    assert.deepEqual(plan.quality.categories.monitor.deletion,{baseline_active:100,candidates:removed,fraction:removed/100,max_delete_fraction:threshold});
+    const result=await syncSnapshot(db,snapshot,{applicationPlan:plan});
+    assert.equal(result.deleted,held?0:removed);assert.equal(result.status,'complete');
+  }
+  const db=database();t.after(()=>db.sqlite.close());
+  const result=await syncSnapshot(db,observed(A,entries(2)),{maxDeleteFraction:0});
+  assert.equal(result.added,2);assert.deepEqual(result.quality.categories.monitor.deletion,{baseline_active:0,candidates:0,fraction:0,max_delete_fraction:0});
+});
+
+test('quarantined presence is not a deletion candidate, but genuine absence is', async t => {
+  const db=database();t.after(()=>db.sqlite.close());await syncSnapshot(db,observed(A,entries(100)));
+  const inputs=entries(99);for(const e of inputs.slice(0,30))e.data.metadata.name=[];
+  const snapshot=observed(B,inputs),{applicationPlan:plan}=await syncSnapshot(db,snapshot,{prepareOnly:true});
+  assert.equal(snapshot.records.length,69);assert.equal(plan.quality.categories.monitor.deletion.candidates,1);
+  assert(!plan.quality.categories.monitor.reasons.includes('category_delete_fraction'));
+  assert(plan.quality.held.monitor.includes('quarantine_rate')); // independent rule remains
+  const small=entries(99);small[0].data.metadata.name=[];
+  const next=observed(B,small),{applicationPlan:normal}=await syncSnapshot(db,next,{prepareOnly:true});
+  assert(!normal.quality.held.monitor);assert.equal(normal.deletions.length,1);assert.equal(normal.retained.length,1);
+  await syncSnapshot(db,next,{applicationPlan:normal});
+  assert.equal(db.sqlite.prepare('SELECT active FROM products WHERE id=1').get().active,1);
+  assert.equal(db.sqlite.prepare('SELECT active FROM products WHERE id=100').get().active,0);
+});
+
+test('held deletion category does not reactivate an inactive row even with valid incoming data', async t => {
+  const db=database();t.after(()=>db.sqlite.close());await syncSnapshot(db,observed(A,entries(101)));
+  await syncSnapshot(db,observed(B,entries(100)));
+  const before=(await storedCatalog(db)).find(r=>r.id===101);assert.equal(before.active,0);
+  const inputs=[...entries(70,'monitor',30),...entries(29,'monitor',1000),...entries(1,'monitor',100)];
+  const result=await syncSnapshot(db,observed(C,inputs));
+  assert(result.quality.held.monitor.includes('category_delete_fraction'));assert.equal(result.reactivated,0);
+  assert.deepEqual((await storedCatalog(db)).find(r=>r.id===101),before);
+});
+
+test('saved policy-v1 partial plans resume without new policy evaluation or hash changes', async t => {
+  const db=database();t.after(()=>db.sqlite.close());const snapshot=observed(A,entries());
+  const prepared=await syncSnapshot(db,snapshot,{prepareOnly:true});
+  const {hash,...body}=structuredClone(prepared.applicationPlan);body.quality.policy.version=1;
+  for(const stats of Object.values(body.quality.categories))delete stats.deletion;
+  const old={...body,hash:digest(body)},original=JSON.stringify(old);
+  assert.equal((await syncSnapshot(db,snapshot,{applicationPlan:old,maxProducts:1})).status,'partial');
+  const result=await syncSnapshot(db,snapshot,{applicationPlan:old,maxDeleteFraction:0});
+  assert.equal(result.status,'complete');assert.equal(result.plan_hash,old.hash);assert.equal(result.quality.policy.version,1);
+  assert.equal(JSON.stringify(await planForSync(await latestSync(db))),original);
+});
+
+test('unknown inventory holds safely and policy-v1 plans remain immutable baselines for new policy', async t => {
+  const db=database();t.after(()=>db.sqlite.close());const snapshot=observed(A,entries());
+  await syncSnapshot(db,snapshot);const current=await planForSync(await latestSync(db));
+  const {hash:unused,...body}=structuredClone(current);body.quality.policy.version=1;
+  for(const stats of Object.values(body.quality.categories))delete stats.deletion;
+  const old={...body,hash:digest(body)};await savePlan(old);
+  await db.query('UPDATE sync_runs SET plan_hash=?',[old.hash]);
+  assert.deepEqual(await readPlan(path.join(PLAN_DIRECTORY,`${old.hash}.json`)),old);
+  const next=observed(B,entries());next.presence[0].upstream_key=null;
+  // Missing accepted identity is a hard failure, not permission to delete.
+  await assert.rejects(syncSnapshot(db,next,{prepareOnly:true}),/missing from inventory/);
+  next.presence[0]=snapshot.presence[0];next.presence[0]={...next.presence[0],evidence:'unknown'};
+  const result=await syncSnapshot(db,next);assert(result.quality.held.monitor.includes('ambiguous_inventory'));
+  assert.equal(result.quality.categories.monitor.deletion.candidates,null);
+  assert.equal(result.quality.policy.version,2);assert.equal(result.updated,0);
+  assert.deepEqual(await readPlan(path.join(PLAN_DIRECTORY,`${old.hash}.json`)),old);
 });
 
 test('quality policy catches per-category/identifier loss, accepts 96/3873 optional losses, defines bootstrap holds', () => {
