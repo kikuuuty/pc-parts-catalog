@@ -6,6 +6,7 @@ import { database } from '../test-support/database.js';
 import { normalize } from '../src/normalize.js';
 import { searchQuery, searchTerms } from '../src/queries.js';
 import { syncSnapshot } from '../src/sync.js';
+import { historicalSync } from '../test-support/historical-sync.js';
 import { addLocalIdentifier, setLocalEnrichment } from '../src/enrichment.js';
 
 const commit = 'a'.repeat(40);
@@ -203,6 +204,7 @@ test('stable ties, explicit order, scoped identifier/facets and the 100-bind cei
 });
 
 test('migration backfills search only and subsequent ingest refreshes fields atomically', async t => {
+  const seed = (db,records) => historicalSync(db,{commit,records});
   const db = database({through:'0003_query_plan_tuning.sql'}); t.after(() => db.sqlite.close());
   const original = record('cpu','Example Core 14900K',{series:'Core 9',variant:'14900KS',part_numbers:['BX14900K']});
   await seed(db,[original]);

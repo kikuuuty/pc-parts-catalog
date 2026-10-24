@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { parseArgs } from 'node:util';
 import { openDatabase } from '../src/database.js';
-import { defaultRepo, loadSnapshot } from '../src/upstream.js';
+import { defaultRepo } from '../src/upstream.js';
+import { latestSync, planForSync, publishedSnapshot } from '../src/application-plan.js';
 import { verifyFilterMetadata } from './lib/filter-verification.js';
 import { verifyFilterSmoke } from './lib/filter-smoke.js';
 import { pacedRequests } from './lib/production-smoke.js';
@@ -9,10 +10,10 @@ import { saveValidationReport } from './lib/validation-report.js';
 
 const { values: args } = parseArgs({ options: { url: { type: 'string' }, repo: { type: 'string', default: defaultRepo }, output: { type: 'string', default: '.cache/filter-verification.json' } } });
 if (args.url) assert(['http://127.0.0.1:8787', 'http://localhost:8787'].includes(args.url), 'Use the local Worker (comparison DB is local)');
-const snapshot = await loadSnapshot(args.repo);
 const db = await openDatabase();
 let report;
 try {
+  const snapshot = publishedSnapshot(await planForSync(await latestSync(db)));
   report = await verifyFilterMetadata(db, { snapshot, output: args.output, measurement: 'local D1/workerd; query adapter, not Worker batch' });
   if (args.url) {
     report.http = {};

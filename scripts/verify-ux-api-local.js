@@ -6,14 +6,13 @@ import { openDatabase } from '../src/database.js';
 import { createWorker } from '../src/worker.js';
 import { fakeLimiters } from '../test-support/rate-limiter.js';
 import { loadQualityCatalog } from '../src/quality/catalog.js';
-import { loadSnapshot } from '../src/upstream.js';
+import { planForSync, publishedSnapshot } from '../src/application-plan.js';
 import { sourceCatalog,matchesFilters } from '../src/quality/ux.js';
 import { buildURL,referencesFromURL,restoreBuild } from '../examples/shared-build.js';
 
 const db=await openDatabase(false);
 try {
-  const snapshot=await loadSnapshot(),catalog=await loadQualityCatalog(db);
-  assert.equal(snapshot.commit,catalog.metadata.last_sync.source_commit);
+  const catalog=await loadQualityCatalog(db),snapshot=publishedSnapshot(await planForSync(catalog.metadata.last_sync));
   const source=sourceCatalog(snapshot,catalog),events=[];
   const worker=createWorker({log:e=>events.push(e)});
   const env={DB:{prepare:sql=>({bind:(...params)=>({all:()=>db.query(sql,params)})})},...fakeLimiters({unlimited:true}),CATALOG_CACHE_EPOCH:'local-ux-api'};

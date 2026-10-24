@@ -12,6 +12,8 @@ import { auditCompleteness, auditDuplicates } from './quality/audit.js';
 import { loadUXFixture, evaluateUX, sourceCatalog } from './quality/ux.js';
 import { loadSearchFixture } from './quality/fixtures.js';
 import { formatCompleteness, formatDuplicates } from './quality/format.js';
+import { readPlan, planForSync, publishedSnapshot } from './application-plan.js';
+import { publicationCases, assertPublicationCoverage } from './quality/publication-cases.js';
 
 const { values: args, positionals } = parseArgs({ allowPositionals: true, options: {
   remote: { type: 'boolean', default: false }, repo: { type: 'string', default: defaultRepo }, ref: { type: 'string', default: 'main' },
@@ -23,6 +25,7 @@ const { values: args, positionals } = parseArgs({ allowPositionals: true, option
   json: { type: 'boolean' }, verbose: { type: 'boolean' }, output: { type: 'string' }, fixture: { type: 'string' },
   suite: { type:'string' }, class: { type:'string' },
   'summary-only': { type:'boolean' },
+  plan: { type:'string' }, 'baseline-repo': { type:'string' },
 } });
 const [command] = positionals;
 const print = object => console.log(JSON.stringify(object, null, 2));
@@ -57,10 +60,12 @@ async function main() {
         format = value => formatDuplicates(value, { verbose: args.verbose, limit: positiveInteger(args.limit, 10) });
       } else {
         const input = args.fixture ? await loadSearchFixture(args.fixture) : await loadUXFixture();
-        const fixture=input.fixture.filter(r=>(!args.category||r.category===args.category)&&(!args.suite||r.suite===args.suite)&&(!args.class||r.class===args.class));
-        const snapshot=await loadSnapshot(args.repo);
+        const requested=input.fixture.filter(r=>(!args.category||r.category===args.category)&&(!args.suite||r.suite===args.suite)&&(!args.class||r.class===args.class));
+        const snapshot=publishedSnapshot(await planForSync(catalog.metadata.last_sync, args.plan));
         if(snapshot.commit!==catalog.metadata.last_sync?.source_commit) throw new Error('Evaluation source must match catalog snapshot');
+        const {fixture,coverage}=publicationCases(requested,snapshot);assertPublicationCoverage(coverage,requested);
         report = await evaluateUX(db,catalog,fixture,{fixtureHash:input.hash,source:sourceCatalog(snapshot,catalog)});
+        report.evaluation_coverage=coverage;
         format = value => JSON.stringify(args.verbose ? value : value.by_intent,null,2);
       }
       if (args.output) await writeFile(args.output, JSON.stringify(report, null, 2) + '\n');
@@ -104,6 +109,8 @@ async function main() {
       const result = await syncSnapshot(db, snapshot, {
         dryRun: args['dry-run'], maxProducts: positiveInteger(args['max-products'], args.remote ? 1000 : Infinity),
         writeBudget: positiveInteger(args['write-budget'], args.remote ? 80_000 : Infinity), maxDeleteFraction,
+        applicationPlan: args.plan ? await readPlan(args.plan) : undefined,
+        baselineSource: args['baseline-repo'] ? await loadSnapshot(args['baseline-repo']) : undefined,
       });
       await writeFile(args.output ?? '.cache/sync-report.json', JSON.stringify(result, null, 2));
       print(result);

@@ -43,6 +43,8 @@ npm run worker:dev
 ```
 
 - 固定snapshotは48,134製品、30カテゴリ。上流の同commitのJSON SchemaをAjvで全件検証します。
+- 現在の取り込み判定はCatalog所有の入力契約で行い、上流Schemaは診断に使用します。
+  隔離・カテゴリ保留・固定適用計画による再開は[同期設計と適用手順](docs/resilient-sync.md)を参照してください。
 - 取得先`.cache/upstream/`、ローカルD1`.wrangler/state/v3/d1/`。Cloudflare資格情報は不要です。
 - `sync`は取得済みcommitを使用します。`--repo <path>`で既存のクリーンなcheckoutも指定できます。
 - `.cache/`、`.wrangler/`、認証情報、データ本体はGit管理対象外です。

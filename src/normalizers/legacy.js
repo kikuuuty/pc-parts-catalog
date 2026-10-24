@@ -9,7 +9,8 @@ export const bool = v => typeof v === 'boolean' ? Number(v) : null;
 export const socket = v => text(v)?.replace(/^LGA\s*(\d)/i, 'LGA $1') ?? null;
 export function manufacturer(v) {
   const s = text(v);
-  return ({ intel: 'Intel', amd: 'AMD', nvidia: 'NVIDIA', asus: 'ASUS', msi: 'MSI', gigabyte: 'Gigabyte', corsair: 'Corsair', 'g.skill': 'G.Skill', teamgroup: 'TEAMGROUP', silverstone: 'SilverStone' })[s?.toLowerCase()] ?? s;
+  const known = { intel: 'Intel', amd: 'AMD', nvidia: 'NVIDIA', asus: 'ASUS', msi: 'MSI', gigabyte: 'Gigabyte', corsair: 'Corsair', 'g.skill': 'G.Skill', teamgroup: 'TEAMGROUP', silverstone: 'SilverStone' };
+  return Object.hasOwn(known, s?.toLowerCase()) ? known[s.toLowerCase()] : s;
 }
 export function cpuClass(d) {
   for (const value of [d.series, d.metadata?.series, d.metadata?.name]) {

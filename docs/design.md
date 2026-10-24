@@ -5,7 +5,8 @@
 2026-09-12 に `buildcores/buildcores-open-db` の commit
 `eec0df175504ebd15f0f3e3a8249a18a22f00940` を取得し、README、LICENSE.txt 全文、
 `docs/DATA_MODEL.md`、`open-db/`、`schemas/`、対象9カテゴリの Schema 全文を確認した。
-上流 Schema は draft-07。同期では**取得した同じcommitのSchemaをそのままAjvで検証**する。
+上流 Schema は draft-07。同commitのSchemaをAjvで診断し、取り込み可否はCatalog所有の入力契約で判定する。
+現在の隔離・存在確認・固定適用計画・再開の契約は[resilient-sync.md](resilient-sync.md)を参照。
 このプロジェクトの列定義は検索用モデルであり、上流 Schema の代用品ではない。
 
 ### 実データの確認例（各 open-db/<category>/<UUID>.json）
@@ -108,7 +109,7 @@ ORDER BYと揃えた。INDEX数は増やしていない。クーラーは型付�
 ## 同期と運用
 
 Node.js 24 ESM、Ajv、Wrangler。ローカル検証はproduction deploy不要。
-取得はGit shallow clone/fetchで1つのcommitに固定。全30カテゴリとSchemaを検証してからD1を書き込む。
+取得はGit shallow clone/fetchで1つのcommitに固定。全30カテゴリの入力契約・完全な存在一覧・基準状態を確認し、適用計画を固定してから製品を書き込む。
 ファイル欠落/UUID不一致/同カテゴリ内キー重複/Schema違反時は同期全体を停止し、削除判定をしない。
 変更対象はraw JSON+normalizer versionのSHA-256とD1のhashを比較して決める。
 初回/更新/再出現は同じUPSERT経路。上流から消えた製品はactive=0、独自データや主キーは保持する。

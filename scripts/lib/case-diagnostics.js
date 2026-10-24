@@ -1,5 +1,5 @@
 import { loadQualityCatalog } from '../../src/quality/catalog.js';
-import { loadSnapshot } from '../../src/upstream.js';
+import { planForSync, publishedSnapshot } from '../../src/application-plan.js';
 import { loadUXFixture,sourceCatalog,evaluateUX,qualityFailures } from '../../src/quality/ux.js';
 import { diagnoseResult } from '../../src/quality/diagnostics.js';
 import { failureDecisions } from './failure-report.js';
@@ -7,7 +7,7 @@ import { failureDecisions } from './failure-report.js';
 export function createCaseDiagnostics(db) {
   let context;
   const load=()=>context??=(async()=>{
-    const catalog=await loadQualityCatalog(db),source=sourceCatalog(await loadSnapshot(),catalog);
+    const catalog=await loadQualityCatalog(db),source=sourceCatalog(publishedSnapshot(await planForSync(catalog.metadata.last_sync)),catalog);
     return {catalog,source,...await loadUXFixture()};
   })().catch(error=>{context=undefined;throw error;});
   return async id=>{

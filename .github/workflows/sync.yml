@@ -38,6 +38,8 @@ jobs:
       MAX_PRODUCTS: ${{ inputs.max_products || '10000' }}
       WRITE_BUDGET: ${{ inputs.write_budget || '2000000' }}
       WRANGLER_SEND_METRICS: 'false'
+      GH_TOKEN: ${{ github.token }}
+      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,6 +64,24 @@ jobs:
         with:
           name: catalog-snapshot-pin
           path: .cache/release-pin.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 90
+      - name: Restore immutable application plan on retry
+        if: github.run_attempt > 1
+        uses: actions/download-artifact@v4
+        with:
+          name: catalog-application-plan
+          path: .cache
+      - name: Validate baseline and freeze application plan
+        run: node scripts/catalog-release.js plan
+      - name: Persist application plan before product writes
+        if: github.run_attempt == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-application-plan
+          path: .cache/release-plan.json
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 90
       - name: Production sync and completion verification

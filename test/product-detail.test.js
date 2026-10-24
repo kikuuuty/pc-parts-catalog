@@ -17,7 +17,7 @@ async function setup(t){
   const db=database();t.after(()=>db.sqlite.close());
   const records=categories.map(category=>normalize(category,{opendb_id:randomUUID(),...extendedCases[category]?.data,
     metadata:{name:`Example ${category}`,part_numbers:['MPN-12345']},
-    identifiers:{version:1,identifiers:['mpn','upc','ean','gtin','jan'].map(type=>({type,value:type==='mpn'?'MPN-12345':'0012345678901',region:'all'}))}},commit));
+    identifiers:{version:1,identifiers:['mpn','upc','ean','gtin','jan'].map(type=>({type,value:type==='mpn'?'MPN-12345':type==='upc'?'012345678901':'0012345678901',region:'all'}))}},commit));
   records.push(normalize('cpu',{opendb_id:randomUUID(),metadata:{name:'No identifiers'}},commit));
   await syncSnapshot(db,{commit,records});
   let clock=1000000;const entries=new Map(),log=[];

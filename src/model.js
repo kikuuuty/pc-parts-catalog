@@ -3,7 +3,7 @@ import { extendedModels } from './extended-models.js';
 
 // Application search model, NOT a replacement for the upstream JSON Schemas.
 // Index declarations describe the frozen initial migration; later tuning is in 0003.
-export const NORMALIZER_VERSION = 1;
+export const NORMALIZER_VERSION = 2;
 const fields = (text = '', real = '', integer = '') => Object.fromEntries([
   ...text.split(' ').filter(Boolean).map(k => [k, 'TEXT']),
   ...real.split(' ').filter(Boolean).map(k => [k, 'REAL']),

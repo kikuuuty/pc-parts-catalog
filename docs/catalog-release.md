@@ -2,6 +2,10 @@
 
 ## Current state
 
+The resilient-ingestion implementation adds normalizer generation 2 and forward
+migration 0011. Production application is separate from implementation/local
+validation. See [input policy, manifest recovery and rollout](resilient-sync.md).
+
 Category FTS generation 8 / cache generation 3 / cursor pagination / stable
 Product Reference / batch resolve / Product Detail are production-verified.
 The 2026-09-18 [transition report](production-transition.md) records the retained
@@ -22,8 +26,9 @@ cancelling an active writer. Production credentials execute only the reviewed
 default branch.
 
 ```text
-npm ci → check → immutable upstream pin → full source validation
-  → migration history / count envelope → atomic incremental sync
+npm ci → check → immutable upstream pin → input contract / schema diagnostics
+  → verified baseline / fixed application plan → upload immutable plan artifact
+  → migration history / planned counts → product-atomic incremental sync
   → complete sync required → D1 release lease
   → catalog integrity → category FTS integrity → source integrity diagnostics
   → all-category Filter metadata / source oracle / plans / read cost
@@ -41,8 +46,9 @@ not yet created, and an old checkout operating against a newer schema.
 
 1. Latest sync complete, current normalizer, finished timestamp. No unfinished
    ingest, running writer, residual foreign lease, FK or SQLite integrity error.
-2. Active count 20,000–100,000, all 30 categories nonempty, exact per-category
-   counts from the validated source. Raw/spec/identifier/facet/source identity
+2. Active count 20,000–100,000, exact per-category counts from the fixed plan.
+   Only an explicit bootstrap category hold permits an empty category.
+   Raw/spec/identifier/facet/source identity
    and active state are validated independently of search results.
 3. All active products occur exactly once in their own category FTS; missing,
    duplicate, wrong-category and inactive/deleted orphan counts are zero.
@@ -86,7 +92,7 @@ query count is not the Worker's remote round-trip count. See the
 
 `sync-<completed sync_runs.id>-fts8-cache3` invalidates both search and Detail
 namespaces. Retry compares actual hashes under the lease and reuses a complete
-sync ID only if that same commit/normalizer has no changes. Workflow attempt/time
+sync ID only if that same plan has no changes and its complete state verifies. Workflow attempt/time
 is not an epoch input. Search TTL stays configurable at 60/300/600; Detail is 600.
 Out-of-band enrichment edits require the existing completed-sync/epoch release
 procedure or become visible after TTL expiry.
@@ -131,8 +137,9 @@ include the intent report.
 gate. See [current local results](category-search-validation.md) and
 [budget configuration](search-evaluation.md).
 
-If sync is partial/failed, keep the same pinned commit and rerun after the lease
-is free; hashes skip completed chunks. Historical failed/partial runs remain as
+If sync is partial/failed, restore the same pinned commit **and application plan**
+and rerun after the lease is free; verified applied chunks are skipped. A missing
+plan cannot be rebuilt from the partial DB. Historical failed/partial runs remain as
 audit records. An expired lease is recovered by the normal sync protocol.
 If quality fails after sync, do not deploy; inspect the reported case/source
 judgment, correct implementation or manually review justified fixture changes.
@@ -146,9 +153,10 @@ ingestion and category moves remain atomic.
 
 `products.source_commit` is the upstream commit at the **last update of that row**.
 Unchanged products deliberately retain it. `sync_runs.source_commit` identifies
-the snapshot completed for the **whole catalog**. Source integrity excludes only
-the row's `source_commit` from canonical product comparison; all other normalized
-product fields, raw, typed specs, upstream identifier sets and facet sets remain
+the observed snapshot whose **application plan completed**. The plan records actual
+row provenance, including unchanged and retained rows. Plan-backed source integrity
+checks `source_commit` as well as all other normalized product fields, raw,
+typed specs, upstream identifier sets and facet sets. These remain
 strictly checked, independent of matching content hashes. Missing/unexpected
 active products fail. The release's snapshot-vs-completed-sync equality remains
 mandatory. No blanket provenance rewrite is performed.

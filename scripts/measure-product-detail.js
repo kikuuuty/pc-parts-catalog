@@ -4,7 +4,7 @@ import { spawn, execFile } from 'node:child_process';
 import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { openDatabase } from '../src/database.js';
-import { loadSnapshot } from '../src/upstream.js';
+import { planForSync, publishedSnapshot } from '../src/application-plan.js';
 import { models } from '../src/model.js';
 import { catalogState, assertCatalogState } from '../src/quality/catalog.js';
 import { cloudflareRelease } from './lib/cloudflare-release.js';
@@ -34,8 +34,7 @@ try {
     assert.deepEqual(report.sync, before.sync);
     report.products = before.products;
   } else {
-    const snapshot = await loadSnapshot();
-    assert.equal(snapshot.commit, report.sync.source_commit);
+    const snapshot = publishedSnapshot(await planForSync(report.sync));
     const records = snapshot.records;
     const selected = [
       ['cpu', records.find(r => r.product.category === 'cpu' && /9800X3D/i.test(r.product.name))],

@@ -9,6 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { getPlatformProxy } from 'wrangler';
 import { fetchUpstream, loadSnapshot } from '../src/upstream.js';
+import { planForSync, publishedSnapshot, latestSync } from '../src/application-plan.js';
 import { syncSnapshot, planSync } from '../src/sync.js';
 import { readState } from '../src/database.js';
 import { loadQualityCatalog } from '../src/quality/catalog.js';
@@ -16,7 +17,6 @@ import { readiness, searchGate, withReleaseLease, cacheEpoch } from './lib/relea
 import { sourceIntegrityGate } from './lib/source-integrity-gate.js';
 import { captureProjection, compareProjection } from './lib/fts-verification.js';
 import { verifyProduction } from './lib/production-smoke.js';
-import { categoryCountDeltaError } from './lib/category-count-guard.js';
 import { saveValidationReport } from './lib/validation-report.js';
 
 const A = 'eec0df175504ebd15f0f3e3a8249a18a22f00940';
@@ -35,7 +35,6 @@ let manifest, proxy, worker, failure, current;
 const fds = [];
 const phase = async name => { current = name; report.phases[name] = 'running'; console.log(`Cross-snapshot phase: ${name}`); await saveValidationReport(output, report); };
 const passed = () => { report.phases[current] = 'passed'; };
-const counts = snapshot => Object.fromEntries(Object.entries(snapshot.report.categories).map(([c, r]) => [c, r.count]));
 const open = async () => {
   proxy = await getPlatformProxy({ configPath, persist: { path: path.join(statePath, 'v3') } });
   return { query: (sql, params = []) => proxy.env.DB.prepare(sql).bind(...params).all() };
@@ -66,22 +65,24 @@ try {
     const a = await loadSnapshot(repo, { reportDirectory: path.join(root, 'source-a') }); assert.equal(a.commit, A);
     const db = await open();
     report.sync_a = await syncSnapshot(db, a); assert.equal(report.sync_a.status, 'complete');
-    const readyA = await readiness(db, { commit: A, expectedCounts: counts(a) });
+    const publishedA = publishedSnapshot(await planForSync(await latestSync(db)));
+    const readyA = await readiness(db, { commit: A, expectedCounts: publishedA.applicationPlan.counts });
     const before = await loadQualityCatalog(db);
-    await sourceIntegrityGate(db, before, a, path.join(root, 'source-a-integrity.json'));
+    await sourceIntegrityGate(db, before, publishedA, path.join(root, 'source-a-integrity.json'));
     passed();
     await phase('delta_sync');
     await fetchUpstream({ repo, ref: B, reportDirectory: path.join(root, 'source-b') });
     const b = await loadSnapshot(repo, { reportDirectory: path.join(root, 'source-b') }); assert.equal(b.commit, B);
     const total = b.records.length; assert(total >= 20000 && total <= 100000);
-    for (const [category, n] of Object.entries(readyA.counts)) assert.equal(categoryCountDeltaError(category, n, counts(b)[category]), null);
-    const state = await readState(db), plan = planSync(b, state), ingested = new Set();
+    const prepared = await syncSnapshot(db, b, { prepareOnly: true, baseSyncId: readyA.sync.id });
+    const applicationPlan = prepared.applicationPlan;
+    const state = await readState(db), plan = planSync({ ...b, applicationPlan }, state), ingested = new Set();
     report.plan = { changed: plan.changed.length, deleted: plan.deleted.length, unchanged: plan.unchanged,
       added: plan.changed.filter(r => !state.has(r.product.upstream_key)).length };
     report.sync_b = await syncSnapshot({ ...db, async query(sql, params) {
       if (/^INSERT INTO ingest/.test(sql)) for (const r of JSON.parse(params[0])) ingested.add(r.product.upstream_key);
       return db.query(sql, params);
-    } }, b, { maxProducts: 10000, writeBudget: 2000000, reuseComplete: true, baseSyncId: report.sync_a.run_id });
+    } }, b, { applicationPlan, maxProducts: 10000, writeBudget: 2000000, reuseComplete: true, baseSyncId: report.sync_a.run_id });
     assert.equal(report.sync_b.status, 'complete');
     assert.equal(report.sync_b.added, report.plan.added);
     assert.equal(report.sync_b.added + report.sync_b.updated + report.sync_b.reactivated, report.plan.changed);
@@ -92,10 +93,10 @@ try {
     for (const p of before.products) if (byKey.get(p.upstream_key)?.active === 1 && !ingested.has(p.upstream_key)) {
       assert.deepEqual(byKey.get(p.upstream_key), p, 'Unchanged product projection was rewritten'); unchangedVerified++;
     }
-    assert.equal(unchangedVerified, plan.unchanged); report.unchanged_verified = unchangedVerified;
+    assert.equal(unchangedVerified, plan.unchanged + applicationPlan.rows.filter(r => r.mode === 'retained' && r.active).length); report.unchanged_verified = unchangedVerified;
     // Measure every old-comparator product-field difference, not just the suspected field.
     report.legacy_product_field_differences = {};
-    for (const r of b.records) for (const [field, value] of Object.entries(r.product)) if (byKey.get(r.product.upstream_key)[field] !== value)
+    for (const r of publishedSnapshot(applicationPlan).records) for (const [field, value] of Object.entries(r.product)) if (byKey.get(r.product.upstream_key)[field] !== value)
       report.legacy_product_field_differences[field] = (report.legacy_product_field_differences[field] ?? 0) + 1;
     report.row_source_commits = (await db.query('SELECT source_commit,count(*) n FROM products WHERE active=1 GROUP BY source_commit')).results;
     passed(); await saveValidationReport(output, report);
@@ -103,11 +104,12 @@ try {
   }
   const snapshot = await loadSnapshot(repo, { reportDirectory: path.join(root, 'source-b') }); assert.equal(snapshot.commit, B);
   const db = await open();
+  const published = publishedSnapshot(await planForSync(await latestSync(db)));
   await phase('readiness');
-  report.readiness = await readiness(db, { commit: B, expectedCounts: counts(snapshot) }); passed();
+  report.readiness = await readiness(db, { commit: B, expectedCounts: published.applicationPlan.counts }); passed();
   await phase('release_gates');
   report.validation = { source_integrity: 'not_run', filter_metadata: 'not_run', search_quality: 'not_run', query_plans: 'not_run' };
-  report.gates = await withReleaseLease(db, locked => searchGate(locked, { snapshot, output: path.join(root, 'release-ux-report.json'),
+  report.gates = await withReleaseLease(db, locked => searchGate(locked, { snapshot: published, output: path.join(root, 'release-ux-report.json'),
     onPhase: (name, state) => { (report.validation ??= {})[name] = state; console.log(`${name}: ${state}`); } }));
   passed();
   await phase('reuse');
@@ -136,7 +138,7 @@ try {
   }
   const direct = await open();
   report.http = {};
-  await verifyProduction(direct, origin, { snapshot, report: report.http });
+  await verifyProduction(direct, origin, { snapshot: published, report: report.http });
   passed(); report.status = 'passed';
 } catch (error) {
   failure = error; report.status = 'failed';

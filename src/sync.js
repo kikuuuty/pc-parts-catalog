@@ -1,15 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { NORMALIZER_VERSION } from './model.js';
 import { readState } from './database.js';
+import { makeApplicationPlan, savePlan, planForSync, latestSync, storedCatalog, assertPlan, assertPlanBase, verifyPlanState, snapshotDigest } from './application-plan.js';
+import { ftsIntegrity } from '../scripts/lib/fts-integrity.js';
 
 export function planSync(snapshot, state) {
-  const present = new Set(snapshot.records.map(r => r.product.upstream_key));
-  const changed = snapshot.records.filter(r => {
+  const records = snapshot.applicationPlan ? snapshot.applicationPlan.rows.filter(r => r.mode === 'accepted').map(r => r.record) : snapshot.records;
+  const present = new Set(snapshot.presence?.map(r => r.upstream_key) ?? snapshot.records.map(r => r.product.upstream_key));
+  const changed = records.filter(r => {
     const old = state.get(r.product.upstream_key);
     return !old || !old.active || old.content_hash !== r.product.content_hash;
   });
-  const deleted = [...state.values()].filter(r => r.active && !present.has(r.upstream_key));
-  return { changed, deleted, unchanged: snapshot.records.length - changed.length };
+  const allowed = snapshot.applicationPlan && new Set(snapshot.applicationPlan.deletions);
+  const deleted = [...state.values()].filter(r => r.active && (allowed ? allowed.has(r.upstream_key) : !snapshot.heldCategories?.[r.category] && !present.has(r.upstream_key)));
+  return { changed, deleted, unchanged: records.length - changed.length };
 }
 
 export function ingestionStatement(records, owner) {
@@ -20,7 +24,7 @@ export function ingestionStatement(records, owner) {
   };
 }
 
-export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, writeBudget = Infinity, dryRun = false, maxDeleteFraction = 0.2, reuseComplete = false, baseSyncId } = {}) {
+export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, writeBudget = Infinity, dryRun = false, maxDeleteFraction = 0.2, reuseComplete = false, baseSyncId, applicationPlan, prepareOnly = false, planFile, baselineSource } = {}) {
   const owner = randomUUID();
   let acquired = false;
   let started = false;
@@ -39,33 +43,55 @@ export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, write
       const lock = count(await db.query('INSERT INTO sync_lock(id,owner,expires_at) VALUES(1,?,unixepoch()+900) ON CONFLICT(id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at WHERE sync_lock.expires_at<=unixepoch() RETURNING owner', [owner]));
       if (lock.results[0]?.owner !== owner) throw new Error('Another sync holds the database lease');
       acquired = true;
-      if (baseSyncId !== undefined) {
-        const latest = (await db.query('SELECT id,source_commit FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0];
-        if ((latest?.id ?? null) !== baseSyncId && latest?.source_commit !== snapshot.commit) throw new Error('Pinned sync superseded by a different catalog snapshot');
-      }
-      count(await db.query("UPDATE sync_runs SET status='failed',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),error='Previous process ended without finalizing; exclusive lease has been recovered' WHERE status='running'"));
     }
-    const state = await readState({ query: async (sql, params) => count(await db.query(sql, params)) });
-    const plan = planSync(snapshot, state);
+    const locked = { ...db, releaseOwner: owner, query: async (sql, params) => count(await db.query(sql, params)) };
+    const latest = await latestSync(locked);
+    if (baseSyncId !== undefined && (latest?.id ?? null) !== baseSyncId && !(applicationPlan && latest?.plan_hash === applicationPlan.hash)) throw new Error('Pinned sync superseded by a different application plan');
+    let manifest = applicationPlan;
+    if (!manifest && latest?.plan_hash && (latest.status !== 'complete' || reuseComplete && latest.source_commit === snapshot.commit)) {
+      const saved = await planForSync(latest, planFile);
+      if (latest.status !== 'complete' || saved.input_hash === snapshotDigest(snapshot)) manifest = saved;
+    }
+    const actual = await storedCatalog(locked);
+    if (manifest) {
+      assertPlan(manifest); assertPlanBase(manifest, latest);
+      if (manifest.input_hash !== snapshotDigest(snapshot)) throw new Error('Snapshot differs from fixed application plan');
+      verifyPlanState(manifest, actual, { baselineOnly: latest?.plan_hash !== manifest.hash });
+    } else {
+      const baselinePlan = latest?.plan_hash ? await planForSync(latest) : null;
+      manifest = makeApplicationPlan(snapshot, actual, latest, { maxDeleteFraction, baselineSource, baselinePlan });
+    }
+    if (!dryRun) {
+      await savePlan(manifest);
+      if (planFile) await savePlan(manifest, planFile);
+      await heartbeat();
+    }
+    report.plan_hash = manifest.hash; report.base_sync_id = manifest.base_sync_id;
+    report.artifact_run_id = process.env.GITHUB_RUN_ID ?? null;
+    report.quality = manifest.quality;
+    report.quarantined = manifest.quarantined.length; report.retained = manifest.retained.length;
+    report.expected_counts = manifest.counts;
+    if (prepareOnly) return { ...report, status: 'prepared', applicationPlan: manifest };
+    const state = await readState(locked);
+    const plan = planSync({ ...snapshot, applicationPlan: manifest }, state);
     report.unchanged = plan.unchanged;
     report.planned_changes = plan.changed.length;
     report.planned_deletions = plan.deleted.length;
-    // Guard per category as well as globally: a removed subtree must not look like ordinary deletion.
-    for (const category of new Set([...state.values()].map(r => r.category))) {
-      const active = [...state.values()].filter(r => r.active && r.category === category).length;
-      const removed = plan.deleted.filter(r => r.category === category).length;
-      if (active && removed / active > maxDeleteFraction) throw new Error(`Deletion fraction for ${category}: ${removed}/${active} exceeds ${maxDeleteFraction}`);
-    }
+    // Deletion guards were fixed against the normal baseline before any writes.
     if (dryRun) return { ...report, status: 'dry-run' };
     // Workflow retries reuse the completed snapshot identity, under the writer
     // lease and after comparing actual product hashes (including lost writes).
     if (reuseComplete && !plan.changed.length && !plan.deleted.length) {
-      const latest = (await db.query('SELECT id,source_commit,normalization_version,status FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0];
-      if (latest?.status === 'complete' && latest.source_commit === snapshot.commit && latest.normalization_version === NORMALIZER_VERSION) {
+      if (latest?.status === 'complete' && latest.plan_hash === manifest.hash) {
+        verifyPlanState(manifest, actual, { complete: true });
+        if (!(await ftsIntegrity(locked)).pass) throw new Error('FTS integrity failed');
         return { ...report, run_id: latest.id, status: 'complete', reused: true };
       }
     }
-    count(await db.query("INSERT INTO sync_runs(id,source_commit,normalization_version,status,started_at) VALUES(?,?,?,'running',strftime('%Y-%m-%dT%H:%M:%fZ','now'))", [owner, snapshot.commit, NORMALIZER_VERSION]));
+    count(await db.query("UPDATE sync_runs SET status='failed',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),error='Previous process ended without finalizing; exclusive lease has been recovered' WHERE status='running'"));
+    // Millisecond ties must not let random UUID ordering select an older failed
+    // run. Allocate a strictly increasing start under the exclusive DB lease.
+    count(await db.query("INSERT INTO sync_runs(id,source_commit,normalization_version,status,started_at,plan_hash,base_sync_id) VALUES(?,?,?,'running',max(strftime('%Y-%m-%dT%H:%M:%fZ','now'),strftime('%Y-%m-%dT%H:%M:%fZ',coalesce(?,'1970-01-01'),'+0.001 seconds')),?,?)", [owner, snapshot.commit, NORMALIZER_VERSION, latest?.started_at ?? null, manifest.hash, manifest.base_sync_id]));
     started = true;
     let processed = 0;
     // Conservative next-chunk allowance; actual D1 rows_written (including indexes/FTS) controls the budget.
@@ -107,15 +133,23 @@ export async function syncSnapshot(db, snapshot, { maxProducts = Infinity, write
     }
     report.remaining = plan.changed.length - report.added - report.updated - report.reactivated + plan.deleted.length - report.deleted;
     report.status = report.remaining ? 'partial' : 'complete';
+    if (report.status === 'complete') {
+      await heartbeat();
+      verifyPlanState(manifest, await storedCatalog(locked), { complete: true });
+      if (!(await ftsIntegrity(locked)).pass) throw new Error('FTS integrity failed');
+      await heartbeat();
+    }
     // Targeted statistics maintenance only after changes; query plans are checked against D1 itself.
     if (report.status === 'complete' && processed > 0) count(await db.query('PRAGMA optimize'));
-    await db.query("UPDATE sync_runs SET status=?,finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),report_json=? WHERE id=?", [report.status, JSON.stringify(report), owner]);
+    const finalized = await db.query("UPDATE sync_runs SET status=?,finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),report_json=? WHERE id=? AND EXISTS(SELECT 1 FROM sync_lock WHERE id=1 AND owner=? AND expires_at>unixepoch())", [report.status, JSON.stringify(report), owner, owner]);
+    if (!finalized.meta?.changes) throw new Error('Sync lease lost before finalization');
     return report;
   } catch (error) {
+    report.status = 'failed';
     if (started) {
-      report.status = 'failed';
-      try { await db.query("UPDATE sync_runs SET status='failed',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),error=?,report_json=? WHERE id=?", [error.message, JSON.stringify(report), owner]); } catch { /* Original error is authoritative (e.g. exhausted daily quota). */ }
+      try { await db.query("UPDATE sync_runs SET status='failed',finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),error=?,report_json=? WHERE id=?", ['Sync interrupted; inspect safe phase diagnostics', JSON.stringify(report), owner]); } catch { /* Original error is authoritative (e.g. exhausted daily quota). */ }
     }
+    error.syncReport = report;
     throw error;
   } finally {
     if (acquired) {

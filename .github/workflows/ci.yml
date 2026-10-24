@@ -5,6 +5,8 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+env:
+  NODE_OPTIONS: --max-old-space-size=6144
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -40,6 +42,7 @@ jobs:
             .cache/upstream-categories.json
             .cache/all-categories-verification.json
             .cache/sync-report.json
+            .cache/application-plans/*.json
             .cache/completeness.json
             .cache/duplicates.json
             .cache/release-*.json
@@ -71,4 +74,5 @@ jobs:
             .cache/cross-snapshot-*/source-*/upstream-categories.json
             .cache/cross-snapshot-*/release-*.json
             .cache/cross-snapshot-*/worker.*.log
+            .cache/application-plans/*.json
           retention-days: 7

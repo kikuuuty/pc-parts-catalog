@@ -122,7 +122,13 @@ test('single statement rolls back product, hash, spec, identifiers and FTS on co
   await syncSnapshot(db, snapshot([good]));
   const invalid = normalize('cpu', { ...d, metadata: { ...d.metadata, name: 'Replacement' } }, COMMIT);
   invalid.identifiers[0].region = null;
-  await assert.rejects(syncSnapshot(db, snapshot([invalid])), /NOT NULL/);
+  await assert.rejects(syncSnapshot(db, snapshot([invalid])), /invariant/);
+  // The DB constraint remains authoritative even if an internal caller bypasses
+  // the new pre-write model validation.
+  await db.query("INSERT INTO sync_lock VALUES(1,'constraint-test',unixepoch()+900)");
+  const statement = ingestionStatement([invalid], 'constraint-test');
+  await assert.rejects(db.query(statement.sql, statement.params), /NOT NULL/);
+  await db.query('DELETE FROM sync_lock');
   assert.equal(row(db, 'SELECT content_hash FROM products').content_hash, good.product.content_hash);
   assert.equal(row(db, 'SELECT raw_json FROM upstream_raw').raw_json, good.raw);
   assert.equal((await search(db, 'cpu', { keyword: '9800X3D' })).length, 1);

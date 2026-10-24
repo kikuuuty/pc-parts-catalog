@@ -22,7 +22,7 @@ export async function catalogState(db) {
   // Administrative release gates may hold the same writer-exclusion lease.
   const running = (await db.query('SELECT owner FROM sync_lock WHERE expires_at>unixepoch()')).results.filter(r => r.owner !== db.releaseOwner);
   if (running.length) throw new Error('Catalog is being synchronized. Run quality measurements after sync finishes.');
-  return (await db.query('SELECT id,source_commit,normalization_version,status,started_at,finished_at FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0] ?? null;
+  return (await db.query('SELECT id,source_commit,normalization_version,status,started_at,finished_at,plan_hash,base_sync_id FROM sync_runs ORDER BY started_at DESC,id DESC LIMIT 1')).results[0] ?? null;
 }
 export async function assertCatalogState(db, initial) {
   if (JSON.stringify(await catalogState(db)) !== JSON.stringify(initial)) throw new Error('Catalog changed during measurement; rerun on an idle database.');

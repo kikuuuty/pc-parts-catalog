@@ -1,4 +1,5 @@
 import { models } from '../model.js';
+import { storedCatalog, verifyPlanState } from '../application-plan.js';
 
 // Checks canonical storage against independently normalized source, including
 // empty identifier/facet sets. A matching hash alone does not prove row integrity.
@@ -33,12 +34,18 @@ export async function verifySourceCatalog(db,catalog,snapshot, { sampleLimit = 5
     // Product provenance is the last row update, NOT the completed catalog
     // snapshot. Unchanged hashes deliberately retain their previous commit.
     // Only source_commit is excluded; the release gate checks sync_runs separately.
-    for (const [field, value] of Object.entries(r.product)) if (field !== 'source_commit' && p[field] !== value) mismatch(key, 'product_field', field);
+    for (const [field, value] of Object.entries(r.product)) if ((field !== 'source_commit' || snapshot.applicationPlan) && p[field] !== value) mismatch(key, 'product_field', field);
     if(!p.spec)mismatch(key,'specs');
     else for (const field of Object.keys(models[r.product.category].fields)) if(p.spec[field]!==r.spec[field])mismatch(key,'specs',field);
     const identifiers=p.identifiers.filter(i=>i.origin==='upstream').map(({type,value,value_key,region,origin_field})=>({type,value,value_key,region,origin_field}));
     if(!same(sorted(identifiers),sorted(r.identifiers)))mismatch(key,'identifiers');
     if(!same(sorted(p.facets.map(({attribute,value})=>({attribute,value}))),sorted(r.facets)))mismatch(key,'facets');
+  }
+  if (snapshot.applicationPlan) {
+    if (catalog.metadata.last_sync?.plan_hash !== snapshot.applicationPlan.hash) mismatch(null, 'plan_hash');
+    const actual = await storedCatalog(db);
+    try { verifyPlanState(snapshot.applicationPlan, actual, { complete: true }); }
+    catch (error) { if (error.code !== 'ERR_ASSERTION') throw error; mismatch(null, 'application_plan_state'); }
   }
   let cursor=0;
   while(true){

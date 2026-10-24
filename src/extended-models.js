@@ -14,6 +14,7 @@ function define(upstream, label, table, scalars = {}, arrays = {}, indexes = {},
     indexes, facets: Object.keys(arrays), searchFields: [],
     // Retain the source mappings for schema conformance checks and documentation.
     scalarSources: Object.fromEntries(Object.entries(scalars).map(([key, [source]]) => [key, source])),
+    inputTypes: Object.fromEntries(Object.entries(scalars).map(([key, [, type, convert]]) => [key, convert === bool ? 'boolean' : type === 'TEXT' || key === 'frame_rate_fps' ? 'text' : type === 'INTEGER' ? 'integer' : 'number'])),
     facetSources: arrays,
     normalizer(data, spec, facet) {
       for (const [key, [source, , convert]] of Object.entries(scalars)) spec[key] = convert(valueAt(data, source));
@@ -78,7 +79,7 @@ export const extendedModels = {
   vr_headset: define('VRHeadset', 'VR Headset', 'vr_headset'),
   webcam: define('Webcam', 'Webcam', 'webcam', {
     resolution: t('resolution'),
-    frame_rate_fps: ['frame_rate', 'INTEGER', value => ({ '24fps': 24, '30fps': 30, '60fps': 60, '90fps': 90, '120fps': 120 })[value] ?? null],
+    frame_rate_fps: ['frame_rate', 'INTEGER', value => new Map([['24fps',24],['30fps',30],['60fps',60],['90fps',90],['120fps',120]]).get(value) ?? null],
   }, { connectivity_type: 'connectivity_type' }, {
     webcam_resolution_fps: ['resolution', 'frame_rate_fps', 'product_id'],
   }),

@@ -2,11 +2,12 @@ import { readFile } from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { openDatabase } from '../src/database.js';
 import { loadQualityCatalog } from '../src/quality/catalog.js';
-import { loadSnapshot } from '../src/upstream.js';
+import { planForSync, publishedSnapshot } from '../src/application-plan.js';
 import { loadUXFixture,evaluateUX,qualityFailures,sourceCatalog } from '../src/quality/ux.js';
 import { diagnoseResult } from '../src/quality/diagnostics.js';
 import { writeFailureReport } from './lib/failure-report.js';
 import { searchQuery,hasCatalogFullScan } from '../src/queries.js';
+import { publicationCases, assertPublicationCoverage } from '../src/quality/publication-cases.js';
 
 const {values:args}=parseArgs({options:{output:{type:'string',default:'.cache/search-failure-analysis.json'},cases:{type:'string'},input:{type:'string'}}});
 if(!args.output.endsWith('.json'))throw Error('--output must end in .json (a sibling .md report is also generated)');
@@ -18,9 +19,11 @@ console.log('Opening local D1');
 const db=await openDatabase(false);
 try {
   console.log('Loading source/catalog');
-  const catalog=await loadQualityCatalog(db),source=sourceCatalog(await loadSnapshot(),catalog),{fixture,hash}=await loadUXFixture();
+  const catalog=await loadQualityCatalog(db),snapshot=publishedSnapshot(await planForSync(catalog.metadata.last_sync)),source=sourceCatalog(snapshot,catalog),{fixture:requested,hash}=await loadUXFixture();
+  const {fixture,coverage}=publicationCases(requested,snapshot);assertPublicationCoverage(coverage,requested);
   console.log(`Evaluating ${fixture.length} cases`);
   const report=await evaluateUX(db,catalog,fixture,{source,fixtureHash:hash});
+  report.evaluation_coverage=coverage;
   report.release_failures=qualityFailures(report);
   report.measurement={environment:'local_d1',measured_at:new Date().toISOString()};
   const ids=new Set(args.cases?JSON.parse(await readFile(args.cases,'utf8')).release_failures.map(f=>f.split(':')[0]):report.release_failures.map(f=>f.split(':')[0]));

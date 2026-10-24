@@ -63,14 +63,13 @@ test('retry reuses completed sync only after comparing DB hashes; partial and fa
   assert.equal((await db.query('SELECT count(*) AS n FROM sync_runs')).results[0].n, 1);
   assert.equal(cacheEpoch(await catalogState(db)), `sync-${first.run_id}-fts${FTS_GENERATION}-cache3`);
   db.sqlite.exec("UPDATE products SET content_hash='interrupted-write'");
-  const resumed = await syncSnapshot(db, snapshot, { reuseComplete: true });
-  assert.notEqual(resumed.run_id, first.run_id);
-  assert.equal(resumed.updated, 1);
+  await assert.rejects(syncSnapshot(db, snapshot, { reuseComplete: true }), /fixed baseline/);
+  db.sqlite.prepare('UPDATE products SET content_hash=?').run(record().product.content_hash);
   // A failed run with all writes already committed still needs finalization.
   db.sqlite.exec("UPDATE sync_runs SET status='failed'");
   const recovered = await syncSnapshot(db, snapshot, { reuseComplete: true });
   assert.equal(recovered.status, 'complete');
-  assert.notEqual(recovered.run_id, resumed.run_id);
+  assert.notEqual(recovered.run_id, first.run_id);
   assert.equal(recovered.updated, 0);
 });
 

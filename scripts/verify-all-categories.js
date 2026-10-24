@@ -9,16 +9,19 @@ import { searchQuery } from '../src/queries.js';
 import { readiness } from './lib/release-gates.js';
 import { captureProjection, compareProjection } from './lib/fts-verification.js';
 import { ftsIntegrity } from './lib/fts-integrity.js';
+import { planForSync, publishedSnapshot, latestSync } from '../src/application-plan.js';
 
 const { values: args } = parseArgs({ options: {
   repo: { type: 'string', default: defaultRepo }, output: { type: 'string', default: '.cache/all-categories-verification.json' },
 } });
 // Intentionally local-only: this validation includes a real no-change sync.
-const snapshot = await loadSnapshot(args.repo);
-console.log(`Validated ${snapshot.records.length} records in ${Object.keys(models).length} categories.`);
+const observed = await loadSnapshot(args.repo);
+console.log(`Observed ${observed.records.length} accepted records in ${Object.keys(models).length} categories.`);
 const db = await openDatabase(false);
 try {
-  const expectedCounts = Object.fromEntries(Object.entries(snapshot.report.categories).map(([c, r]) => [c, r.count]));
+  const snapshot = { ...observed, ...publishedSnapshot(await planForSync(await latestSync(db))) };
+  assert.equal(snapshot.commit, observed.commit, 'Observation differs from completed plan');
+  const expectedCounts = snapshot.applicationPlan.counts;
   const ready = await readiness(db, { commit: snapshot.commit, expectedCounts });
   console.log('Release readiness and projection checks passed. Comparing stored rows to upstream.');
   const rows = async (sql, params = []) => (await db.query(sql, params)).results;
@@ -61,6 +64,9 @@ try {
       cursor = page.at(-1).id;
     }
     assert.equal(stats.normalized_rows_verified, records.length);
+    if (!records.length && snapshot.applicationPlan.quality.held[category]) {
+      stats.search_sample = { status: 'not_run', reason: 'held_without_baseline' }; categories[category] = stats; continue;
+    }
     // Real upstream samples (synthetic all-identifier-type coverage is in tests).
     const candidate = records.find(r => r.product.name.length <= 200 && (r.product.name.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) <= 12);
     assert(candidate, `No real keyword sample: ${category}`);
@@ -96,11 +102,11 @@ try {
   const repeat = await syncSnapshot({ ...db, async query(sql, params) {
     if (/^INSERT INTO ingest/.test(sql)) ingestStatements++;
     return db.query(sql, params);
-  } }, snapshot);
+   } }, observed, { applicationPlan: snapshot.applicationPlan, reuseComplete: true });
   const after = await captureProjection(db);
   console.log('Captured post-sync fingerprints.');
   const diff = compareProjection(before, after);
-  assert.equal(repeat.unchanged, snapshot.records.length); assert.equal(ingestStatements, 0);
+  assert(repeat.reused); assert.equal(repeat.added+repeat.updated+repeat.reactivated+repeat.deleted, 0); assert.equal(ingestStatements, 0);
   assert.deepEqual(diff.data_changed_tables.filter(t => t !== 'sync_runs'), []);
   assert.equal(diff.fts_difference_count, 0);
   const totals = {

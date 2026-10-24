@@ -5,7 +5,9 @@ import { readFile,writeFile,readdir,mkdir,mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { getPlatformProxy } from 'wrangler';
-import { loadSnapshot } from '../src/upstream.js';
+import { defaultRepo, loadSnapshot } from '../src/upstream.js';
+import { latestSync, planForSync, publishedSnapshot } from '../src/application-plan.js';
+import { publicationCases, assertPublicationCoverage } from '../src/quality/publication-cases.js';
 import { loadQualityCatalog } from '../src/quality/catalog.js';
 import { loadUXFixture,evaluateUX,sourceCatalog,qualityFailures } from '../src/quality/ux.js';
 import { syncSnapshot } from '../src/sync.js';
@@ -21,14 +23,13 @@ import { fakeLimiters } from '../test-support/rate-limiter.js';
 import { verifySourceCatalog } from '../src/quality/integrity.js';
 import { readiness } from './lib/release-gates.js';
 
-const {values:args}=parseArgs({options:{'source-location':{type:'string',default:'.cache/all-categories-fresh-location.json'},directory:{type:'string'}}});
+const {values:args}=parseArgs({options:{'source-location':{type:'string',default:'.cache/all-categories-fresh-location.json'},directory:{type:'string'},repo:{type:'string',default:defaultRepo},'baseline-repo':{type:'string'}}});
 await mkdir('.cache',{recursive:true});
 const root=path.resolve(args.directory??await mkdtemp('.cache/category-release-'));
 assert(root.startsWith(path.resolve('.cache')+path.sep));
 await mkdir(root,{recursive:true});
 const save=(name,value)=>writeFile(path.join(root,name),JSON.stringify(value,null,2)+'\n');
-const snapshot=await loadSnapshot();
-assert.equal(snapshot.commit,'eec0df175504ebd15f0f3e3a8249a18a22f00940');assert.equal(snapshot.records.length,48134);
+const observed=await loadSnapshot(args.repo);
 const manifestFile=path.join(root,'manifest.json');
 let manifest;
 try {manifest=JSON.parse(await readFile(manifestFile,'utf8'));} catch(error) {if(error.code!=='ENOENT') throw error;}
@@ -39,11 +40,11 @@ if(!manifest){
   const dbdir=path.join(root,'state/v3/d1/miniflare-D1DatabaseObject');await mkdir(dbdir,{recursive:true});
   const sqlitePath=path.join(dbdir,names[0]),configPath=path.join(root,'wrangler.json');
   const original=new DatabaseSync(path.join(sourceDir,names[0]),{readOnly:true});
-  try {assert.equal(original.prepare('SELECT count(*) n FROM products WHERE active=1').get().n,48134);await backup(original,sqlitePath);}finally{original.close();}
+  try {assert(original.prepare('SELECT count(*) n FROM products WHERE active=1').get().n>0);await backup(original,sqlitePath);}finally{original.close();}
   const config=JSON.parse(await readFile(sourceLocation.configPath,'utf8'));
   await writeFile(configPath,JSON.stringify({name:'category-search-local',compatibility_date:config.compatibility_date,
     d1_databases:config.d1_databases.map(d=>({...d,remote:false}))}));
-  manifest={root,sqlitePath,configPath,snapshot:snapshot.commit,engine:'local D1/workerd (not remote D1)'};
+  manifest={root,sqlitePath,configPath,snapshot:observed.commit,engine:'local D1/workerd (not remote D1)'};
   await save('manifest.json',manifest);
 }
 await writeFile('.cache/category-release-latest.json',JSON.stringify({directory:root},null,2));
@@ -61,25 +62,33 @@ try {
       rows_read:result.reduce((n,r)=>n+r.meta.rows_read,0),rows_written:result.reduce((n,r)=>n+r.meta.rows_written,0),
       sql_duration_ms:result.reduce((n,r)=>n+r.meta.duration,0),atomic_batch:true});
   }
-  if(!(await db.query("SELECT 1 FROM d1_migrations WHERE name='0009_display_order.sql'")).results.length) {
-    const sql=await readFile('migrations/0009_display_order.sql','utf8');
+  for(const name of ['0009_display_order.sql','0010_product_offer_summary.sql','0011_sync_manifest.sql']) if(!(await db.query('SELECT 1 FROM d1_migrations WHERE name=?',[name])).results.length) {
+    const sql=await readFile(`migrations/${name}`,'utf8');
     const statements=sql.replace(/^--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean);
-    await proxy.env.DB.batch([...statements.map(s=>proxy.env.DB.prepare(s)),proxy.env.DB.prepare("INSERT INTO d1_migrations(name) VALUES('0009_display_order.sql')")]);
+    await proxy.env.DB.batch([...statements.map(s=>proxy.env.DB.prepare(s)),proxy.env.DB.prepare('INSERT INTO d1_migrations(name) VALUES(?)').bind(name)]);
   }
-  const integrity=await ftsIntegrity(db);assert(integrity.pass);assert.equal(integrity.active_products,48134);await save('integrity.json',integrity);
-  await save('readiness.json',await readiness(db,{commit:snapshot.commit,expectedCounts:Object.fromEntries(Object.entries(snapshot.report.categories).map(([c,r])=>[c,r.count]))}));
+  assert.equal(manifest.snapshot,observed.commit,'Resume requires the original observation');
+  const base=await latestSync(db);
+  const baselineSource=base&&!base.plan_hash ? args['baseline-repo'] ? await loadSnapshot(args['baseline-repo']) : observed : undefined;
+  if(baselineSource) assert.equal(baselineSource.commit,base.source_commit,'Supply --baseline-repo at the legacy completed commit');
+  await save('normalization-sync.json',await syncSnapshot(db,observed,{baselineSource,reuseComplete:true}));
+  const snapshot=publishedSnapshot(await planForSync(await latestSync(db)));
+  const integrity=await ftsIntegrity(db);assert(integrity.pass);assert.equal(integrity.active_products,snapshot.records.length);await save('integrity.json',integrity);
+  await save('readiness.json',await readiness(db,{commit:snapshot.commit,expectedCounts:snapshot.applicationPlan.counts}));
   const catalog=await loadQualityCatalog(db), expected=sourceCatalog(snapshot,catalog);
   const catalogIntegrity=await verifySourceCatalog(db,catalog,snapshot);
   await save('catalog-integrity.json',catalogIntegrity);
   assert(catalogIntegrity.pass);
-  const input=await loadUXFixture();fixture=input.fixture;const hash=input.hash;
+  const input=await loadUXFixture(),selection=publicationCases(input.fixture,snapshot);assertPublicationCoverage(selection.coverage,input.fixture);
+  fixture=selection.fixture;const hash=input.hash;
   const quality=await evaluateUX(db,catalog,fixture,{fixtureHash:hash,source:expected});
+  quality.evaluation_coverage=selection.coverage;
   quality.release_failures=qualityFailures(quality);
   await save('quality.json',quality);console.log(JSON.stringify({by_intent:quality.by_intent,quality_failures:quality.release_failures},null,2));
   const plans=await verifyPlans(db);await save('plans.json',plans);
   assert(plans.every(p=>p.index_check),'Representative query-plan gate failed');
   const detailPlans=[];
-  for(const category of categories){const id=catalog.products.find(p=>p.category===category&&p.active===1).id;
+  for(const category of categories.filter(c=>snapshot.applicationPlan.counts[c]>0)){const id=catalog.products.find(p=>p.category===category&&p.active===1).id;
     for(const [kind,sql] of Object.entries({product:detailProductQuery.sql,...detailQueries(category)})) {
       const details=(await db.query(`EXPLAIN QUERY PLAN ${sql}`,[id])).results.map(r=>r.detail);
       const fullScan=hasCatalogFullScan(details)||details.some(d=>/^SCAN (?:upstream_identifiers|local_identifiers|product_facets)(?: |$)/.test(d));
@@ -90,7 +99,7 @@ try {
   const worker=createWorker({log:e=>logs.push(e),cache:{async match(key){return cacheEntries.get(key.url)?.clone();},async put(key,r){cacheEntries.set(key.url,r.clone());}}});
   const env={DB:proxy.env.DB,...fakeLimiters({unlimited:true}),CATALOG_CACHE_EPOCH:'local-detail-validation'};
   const detailResponses=[];
-  for(const category of categories){const p=catalog.products.find(p=>p.category===category&&p.active===1);
+  for(const category of categories.filter(c=>snapshot.applicationPlan.counts[c]>0)){const p=catalog.products.find(p=>p.category===category&&p.active===1);
     const req=new Request(`https://local.catalog/v1/products/${p.id}`),response=await worker.fetch(req,env);assert.equal(response.status,200);
     const detail=await response.json();assert.equal(detail.id,p.id);assert.equal(detail.category,category);
     const hit=await worker.fetch(req,env);assert.equal(hit.headers.get('X-Cache'),'HIT');assert.equal(logs.at(-1).d1_queries,0);
@@ -98,9 +107,9 @@ try {
   assert.equal((await worker.fetch(new Request('https://local.catalog/v1/products/999999999'),env)).status,404);
   await save('detail-api.json',detailResponses);
   const before=await captureProjection(db),start=performance.now();
-  const sync=await syncSnapshot(db,snapshot);const elapsed=performance.now()-start;
+  const sync=await syncSnapshot(db,observed,{applicationPlan:snapshot.applicationPlan,reuseComplete:true});const elapsed=performance.now()-start;
   const after=await captureProjection(db),diff=compareProjection(before,after);
-  assert.equal(sync.unchanged,48134);assert.equal(diff.fts_difference_count,0);assert.deepEqual(diff.data_changed_tables.filter(t=>t!=='sync_runs'),[]);
+  assert(sync.reused);assert.equal(sync.added+sync.updated+sync.reactivated+sync.deleted,0);assert.equal(diff.fts_difference_count,0);assert.deepEqual(diff.data_changed_tables,[]);
   await save('sync-noop.json',{...sync,elapsed_ms:elapsed,integrity:await ftsIntegrity(db)});
 } finally {await proxy.dispose();}
 const sqlite=new DatabaseSync(manifest.sqlitePath);

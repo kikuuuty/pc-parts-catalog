@@ -8,8 +8,9 @@ import { catalogState, assertCatalogState } from '../../src/quality/catalog.js';
 import { assertCategories, assertSearchContract, assertPublicHeaders } from './api-contract.js';
 import { models } from '../../src/model.js';
 import { resolveProducts } from '../../src/product-reference.js';
-import { loadSnapshot } from '../../src/upstream.js';
+import { planForSync, publishedSnapshot } from '../../src/application-plan.js';
 import { verifyFilterSmoke } from './filter-smoke.js';
+import { publicationCases, assertPublicationCoverage } from '../../src/quality/publication-cases.js';
 
 export function productionOrigin(value) {
   const url = new URL(value);
@@ -56,7 +57,7 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
   try {
   const initial = await catalogState(db);
   assert.equal(initial?.status, 'complete');
-  const snapshot = suppliedSnapshot ?? await loadSnapshot();
+   const snapshot = suppliedSnapshot ?? publishedSnapshot(await planForSync(initial));
   Object.assign(report, { snapshot_commit: snapshot.commit, sync: initial });
   assert.equal(snapshot.commit, initial.source_commit, 'HTTP verification snapshot differs');
   report.phase = 'search_contract';
@@ -86,26 +87,32 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
     if (method === 'POST') assert.equal(result.response.headers.get('x-cache'), 'BYPASS');
     return {...result,lastSortValues:keyword===undefined&&rows.length?JSON.parse(rows.slice(0,limit).at(-1)._cursor_values):undefined};
   };
-  const representatives = [
-    { category: 'cpu', keyword: '9800x3d' },
-    { category: 'cpu', keyword: 'amd 9800x3d' },
-    { category: 'memory', keyword: 'ddr5 6000 cl30 32gb' },
-    { category: 'memory', keyword: 'ddr5' },
-  ];
+   const counts = snapshot.applicationPlan?.counts ?? Object.fromEntries(Object.keys(models).map(c => [c,snapshot.records.filter(r=>r.product.category===c).length]));
+   const available = Object.keys(models).filter(c=>counts[c]>0);
+   assert(available.length, 'No published HTTP samples');
+   const selected = ['cpu','memory'].filter(c=>counts[c]>0);
+   if (!selected.length) selected.push(available[0]);
+   // Samples come from the fixed publication. Named SKU quality is covered by
+   // the Golden fixture (with its explicit quarantine exclusions) below.
+   const representatives = selected.map(category => ({ category, keyword: categorySmokeSamples(snapshot,category).general.product.name }));
+   report.representative_samples = representatives;
   for (const input of representatives) {
     const get = await search(input);
     assert(get.body.data.length > 0, 'Representative query empty');
     assert.deepEqual((await search(input, 'POST')).body, get.body, 'GET/POST body differs');
   }
-  await search({ category: 'memory', keyword: 'ddr5', offset: 20 });
-  await search({ category: 'memory', keyword: 'ddr5', limit: 50, offset: 950 }, 'POST');
+   const pageCategory = counts.memory >= 4 ? 'memory' : available.find(c=>counts[c]>=4);
+   assert(pageCategory, 'Published HTTP pagination sample missing');
+   const words = categorySmokeSamples(snapshot,pageCategory).general.product.name.match(/[\p{L}\p{N}]+/gu).map(w=>w.slice(0,24));
+   await search({ category: pageCategory, keyword: words[0], offset: 20 });
+   await search({ category: pageCategory, keyword: words[0], limit: 50, offset: 950 }, 'POST');
 
   // Existing cache identity preserves INTERNAL spaces; the search parser treats
   // these as token separators. No cache-bypass parameter/header or rate bypass.
   // A prewarmed key or POP change is inconclusive; try another bounded key.
   let cache = false;
   for (let attempt = 0; attempt < 6 && !cache; attempt++) {
-    const input = { category: 'memory', keyword: `ddr5${' '.repeat(randomInt(2, 150))}6000` };
+     const input = { category: pageCategory, keyword: `${words[0]}${' '.repeat(randomInt(2, 150))}${words[1]??words[0]}` };
     const first = await search(input);
     if (first.response.headers.get('x-cache') !== 'MISS') continue;
     assert.match(first.response.headers.get('server-timing') ?? '', /d1;dur=/, 'MISS must execute D1');
@@ -123,7 +130,11 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
   report.cache = 'MISS -> HIT; POST body equal';
   report.phase = 'category_search_detail_identifiers';
   const extended = report.extended_categories;
-  for (const category of Object.keys(models)) {
+   for (const category of Object.keys(models)) {
+     if (snapshot.applicationPlan?.counts[category] === 0 && snapshot.applicationPlan.quality.held[category]) {
+       extended.push({ category, keyword: 'not_run', identifier: 'not_run', detail: 'not_run', reason: 'held_without_baseline' });
+       continue;
+     }
     const { general, identified } = categorySmokeSamples(snapshot, category);
     const sample = general.product;
     const item = { category, keyword: 'running', identifier: 'not_run', response: 'not_run', detail: 'not_run' }; extended.push(item);
@@ -153,7 +164,9 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
   report.phase = 'golden_http';
   let matched = 0;
   if (golden) {
-    const { fixture } = await loadUXFixture();
+     const { fixture: requested } = await loadUXFixture();
+     const { fixture, coverage } = publicationCases(requested, snapshot);
+     report.evaluation_coverage = coverage; assertPublicationCoverage(coverage, requested);
     for (const item of fixture) {
       await search({ ...item.search, category: item.category, ...(item.query?{keyword:item.query}:{}) }, item.search ? 'POST' : 'GET');
       matched++;
@@ -162,9 +175,9 @@ export async function verifyProduction(db, origin, { golden = true, request = pa
     assert.equal(matched, fixture.length);
   }
   report.phase = 'pagination_resolve';
-  const listing=await search({category:'memory',limit:3},'POST');
+   const listing=await search({category:pageCategory,limit:3},'POST');
   assert(listing.body.meta.next_cursor);
-  await search({category:'memory',limit:5,cursor:listing.body.meta.next_cursor},'POST',listing.lastSortValues);
+   await search({category:pageCategory,limit:5,cursor:listing.body.meta.next_cursor},'POST',listing.lastSortValues);
   const refs=listing.body.data.map(({source,upstream_key})=>({source,upstream_key}));
   refs.push(refs[0],{source:'unknown',upstream_key:'CPU/missing'});
   const resolved=await request('/v1/products/resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({products:refs})});

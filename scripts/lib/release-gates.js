@@ -9,13 +9,14 @@ import { CACHE_SCHEMA_GENERATION } from '../../src/search-cache.js';
 import { NORMALIZER_VERSION, categories, models } from '../../src/model.js';
 import { catalogState, assertCatalogState, loadQualityCatalog } from '../../src/quality/catalog.js';
 import { loadUXFixture, evaluateUX, qualityFailures, sourceCatalog } from '../../src/quality/ux.js';
-import { loadSnapshot } from '../../src/upstream.js';
+import { planForSync, publishedSnapshot } from '../../src/application-plan.js';
 import { ftsIntegrity } from './fts-integrity.js';
 import { verifyPlans } from '../../src/queries.js';
 import path from 'node:path';
 import { sourceIntegrityGate } from './source-integrity-gate.js';
 import { verifyFilterMetadata } from './filter-verification.js';
 import { saveValidationReport } from './validation-report.js';
+import { publicationCases, assertPublicationCoverage } from '../../src/quality/publication-cases.js';
 
 export const FTS_GENERATION = 8;
 export function productionConfig(config, env = process.env) {
@@ -64,6 +65,9 @@ export async function readiness(db, { commit, expectedCounts } = {}) {
   assert.equal(sync?.status, 'complete', 'Latest sync must be complete');
   assert(sync.finished_at && Number.isFinite(Date.parse(sync.finished_at)), 'Completed timestamp missing');
   assert.equal(sync.normalization_version, NORMALIZER_VERSION, 'Normalizer generation differs');
+  const manifest = await planForSync(sync);
+  if (expectedCounts) assert.deepEqual(expectedCounts, manifest.counts, 'Readiness counts differ from application plan');
+  expectedCounts = manifest.counts;
   if (commit) assert.equal(sync.source_commit, commit, 'Unexpected completed snapshot');
   assert.equal((await db.query("SELECT count(*) AS n FROM sync_runs WHERE status='running'")).results[0].n, 0, 'Unfinalized writer');
   // Historical failed/partial runs are retained as an audit trail; a later
@@ -72,12 +76,12 @@ export async function readiness(db, { commit, expectedCounts } = {}) {
   assert.equal((await db.query('PRAGMA foreign_key_check')).results.length, 0, 'Foreign key violation');
   assert.deepEqual((await db.query('PRAGMA quick_check')).results.map(r => r.quick_check), ['ok'], 'SQLite integrity failure');
   assert.equal((await db.query('SELECT count(*) AS n FROM ingest')).results[0].n, 0, 'Unfinished ingestion');
-  const counts = Object.fromEntries((await db.query('SELECT category,count(*) AS n FROM products WHERE active=1 GROUP BY category')).results.map(r => [r.category, r.n]));
+  const counts = { ...Object.fromEntries(categories.map(c => [c,0])), ...Object.fromEntries((await db.query('SELECT category,count(*) AS n FROM products WHERE active=1 GROUP BY category')).results.map(r => [r.category, r.n])) };
   const active = Object.values(counts).reduce((a, b) => a + b, 0);
   assert(active >= 20000 && active <= 100000, 'Active count outside reviewed production envelope (20000–100000)');
   for (const category of categories) {
-    assert(counts[category] > 0, 'Empty product category');
-    if (expectedCounts) assert.equal(counts[category], expectedCounts[category], 'Active count differs from validated snapshot');
+    if (!(counts[category] > 0)) assert(manifest.quality.held[category], 'Unexpected empty product category');
+    if (expectedCounts) assert.equal(counts[category] ?? 0, expectedCounts[category], 'Active count differs from application plan');
     const table = models[category].table;
     const columns = (await db.query(`PRAGMA table_info(${table})`)).results.map(r => r.name);
     assert(Object.keys(models[category].fields).every(field => columns.includes(field)), 'Typed schema/model mismatch');
@@ -103,7 +107,7 @@ export async function searchGate(db, { representative = false, output = '.cache/
   try {
   phase('source_integrity');
   const catalog = await loadQualityCatalog(db);
-  const snapshot = suppliedSnapshot ?? await loadSnapshot();
+   const snapshot = suppliedSnapshot ?? publishedSnapshot(await planForSync(catalog.metadata.last_sync));
   Object.assign(report, { snapshot_commit: snapshot.commit, sync: catalog.metadata.last_sync });
   report.source_integrity = await sourceIntegrityGate(db, catalog, snapshot, path.join(path.dirname(output), 'release-source-integrity.json'));
   passed();
@@ -114,8 +118,11 @@ export async function searchGate(db, { representative = false, output = '.cache/
   const { fixture: fullFixture, hash } = await loadUXFixture();
   const selected = new Set(['cpu-9800x3d','ux-dt990-pro250','ux-mag','ux-meshify','ux-mag-atx-b850','ux-oled-27-4k','ux-board-atx-b850','ux-memory-ddr5-32','ux-board-empty',
     ...fullFixture.filter(r=>r.intent==='identifier').slice(0,2).map(r=>r.id)]);
-  const fixture = representative ? fullFixture.filter(r=>selected.has(r.id)) : fullFixture;
-  if(representative) assert.equal(fixture.length,11,'Representative fixture coverage changed');
+   const requested = representative ? fullFixture.filter(r=>selected.has(r.id)) : fullFixture;
+   if(representative) assert.equal(requested.length,11,'Representative fixture coverage changed');
+   const { fixture, coverage } = publicationCases(requested, snapshot);
+   report.evaluation_coverage = coverage;
+   assertPublicationCoverage(coverage, requested);
   Object.assign(report, await evaluateUX(db, catalog, fixture, { fixtureHash: hash,source:sourceCatalog(snapshot,catalog) }));
   const budgetFile=process.env.PERFORMANCE_BUDGET_FILE || 'docs/production-performance-budgets.json';
   const budgets=JSON.parse(await readFile(budgetFile,'utf8'));

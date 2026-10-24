@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import { database } from '../test-support/database.js';
 import { normalize } from '../src/normalize.js';
 import { syncSnapshot } from '../src/sync.js';
+import { historicalSync } from '../test-support/historical-sync.js';
 import { parseSearchIntent } from '../src/search-intent.js';
 import { searchQuery } from '../src/queries.js';
 
@@ -125,7 +126,7 @@ test('manufacturer fields and punctuation variants combine with specs without ch
 
 test('search index migration changes neither catalog values nor FTS, and spec queries stay within 100 binds', async t => {
   const db=database({through:'0004_search_relevance.sql'});t.after(()=>db.sqlite.close());
-  await seed(db,[record('memory','Memory DDR5 32GB',{ram_type:'DDR5',capacity:32,speed:6000,cas_latency:30})]);
+  await historicalSync(db,{commit,records:[record('memory','Memory DDR5 32GB',{ram_type:'DDR5',capacity:32,speed:6000,cas_latency:30})]});
   const tables=['products','memory','upstream_raw','upstream_identifiers','local_identifiers','local_enrichments','product_fts'];
   const snapshot=()=>tables.map(table=>db.sqlite.prepare(`SELECT * FROM ${table}`).all());
   const before=snapshot();

@@ -6,6 +6,7 @@ import { models, initialCategories, ftsName } from '../src/model.js';
 import { normalize } from '../src/normalize.js';
 import { categoryCoverage, assertModelSchema } from '../src/upstream.js';
 import { syncSnapshot } from '../src/sync.js';
+import { historicalSync } from '../test-support/historical-sync.js';
 import { searchQuery, hasCatalogFullScan } from '../src/queries.js';
 import { addLocalIdentifier, setLocalEnrichment } from '../src/enrichment.js';
 import { extendedCases } from '../test-support/extended-cases.js';
@@ -40,7 +41,7 @@ test('category inventory compares the complete tree and schemas, including unkno
 test('forward migration preserves old rows, IDs, local data and FTS; new categories share UUIDs safely', async t => {
   const db = database({ through: '0006_fts_projection_consistency.sql' }); t.after(() => db.sqlite.close());
   const legacy = initialCategories.map(c => normalize(c, source(), commit));
-  await syncSnapshot(db, { commit, records: legacy });
+  await historicalSync(db, { commit, records: legacy });
   await addLocalIdentifier(db, { productId: 1, type: 'jan', value: 'local-12345', evidence: 'test label' });
   await setLocalEnrichment(db, { productId: 1, namespace: 'test', key: 'preserved', value: { keep: true }, evidence: 'test' });
   const tables = ['products', ...initialCategories.map(c => models[c].table), 'upstream_raw', 'upstream_identifiers', 'product_facets', 'product_fts', 'local_identifiers', 'local_enrichments', 'local_identifier_fts'];
@@ -49,7 +50,7 @@ test('forward migration preserves old rows, IDs, local data and FTS; new categor
   db.sqlite.exec(readFileSync(new URL('../migrations/0007_all_categories.sql', import.meta.url), 'utf8'));
   assert.deepEqual(contents(), before);
   const snapshot = { commit, records: [...legacy, ...extra.map(c => normalize(c, source(), commit))] };
-  const result = await syncSnapshot(db, snapshot);
+  const result = await historicalSync(db, snapshot);
   assert.equal(result.unchanged, 9); assert.equal(result.added, 21); assert.equal(result.updated, 0);
   assert.equal(count(db, 'products'), 30); assert.equal(count(db, 'product_fts'), 9); assert.equal(count(db, 'extended_product_fts'), 21);
   for (const category of extra) {
@@ -65,7 +66,7 @@ test('forward migration preserves old rows, IDs, local data and FTS; new categor
     db.sqlite.exec(`CREATE TRIGGER no_write_${table}_${event} BEFORE ${event} ON ${table} BEGIN SELECT RAISE(ABORT,'unexpected catalog rewrite'); END;`);
   }
   db.sqlite.exec("CREATE TRIGGER no_ingest BEFORE INSERT ON ingest BEGIN SELECT RAISE(ABORT,'unexpected FTS rewrite'); END;");
-  const repeat = await syncSnapshot(db, snapshot);
+  const repeat = await historicalSync(db, snapshot);
   assert.equal(repeat.unchanged, 30); assert.equal(repeat.updated, 0);
   assert.deepEqual(contents(), stable);
   assert.deepEqual(db.sqlite.prepare('SELECT * FROM extended_product_fts ORDER BY rowid').all(), extendedFTS);

@@ -177,7 +177,7 @@ test('browse and filter-only also grow from source, independent of their histori
 });
 
 for(const type of ['mpn','ean','upc','jan','gtin'])test(`${type}: identifier enrichment expands only source owners and still requires Hit@1`,async t=>{
-  const db=localDatabase(t),keys=Array.from({length:3},()=>randomUUID()),value='0012345678901';
+  const db=localDatabase(t),keys=Array.from({length:3},()=>randomUUID()),value=type==='upc'?'012345678901':'0012345678901';
   const item={id:`exact-${type}`,category:'monitor',intent:'identifier',query:value,search:{identifier:{type,value}},floors:{hit_at:5}};
   let catalog,source,report;
   for(const [commit,count] of [[A,1],[B,2]]) {
