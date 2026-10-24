@@ -166,6 +166,14 @@ CLIのsyncも保存済みreceipt/hashを必須とし、workflow条件だけに�
 
 ## 後段検証・状態
 
+本番workflowは同期と公開を別jobに分離し、公開jobの上限は120分。
+同期complete後の公開だけの復旧には、`publish_existing`と元run/attempt、
+expected sync/hash/commitを明示指定する。元run全体のcancelledは同期失敗とは扱わない。
+保存artifact・成功同期step・lease下の固定計画/実DB照合を必須とし、
+新しい同期や計画を作らず全公開gateを再実行する。元pinのrun IDは書き換えない。
+入力、共通公開処理、公開jobだけの再試行、計測範囲は
+[公開手順](catalog-release.md#separate-sync-and-publication-jobs)を参照。
+
 readiness件数、source integrity、Filter oracle、検索品質、HTTP smokeは同じmanifestの
 公開予定集合を使う。実DB/検索結果から期待集合を作らない。保持行は旧世代/旧raw/旧source_commitも
 厳密に検証する。非active・ローカル補完も固定hashで確認する。FTSの文書内容とprojection検証も継続する。

@@ -4,6 +4,26 @@ on:
     - cron: '17 3 * * 1'
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'Sync and release, or validate/publish a completed sync without ingestion'
+        type: choice
+        options: [sync_release, publish_existing]
+        default: sync_release
+      source_run_id:
+        description: 'publish_existing: original production sync run ID'
+        type: string
+      source_attempt:
+        description: 'publish_existing: attempt whose sync step completed'
+        type: string
+      expected_sync_id:
+        description: 'publish_existing: exact completed sync UUID'
+        type: string
+      expected_plan_hash:
+        description: 'publish_existing: immutable application plan SHA-256'
+        type: string
+      expected_upstream_commit:
+        description: 'publish_existing: exact BuildCores commit'
+        type: string
       upstream_ref:
         description: 'Upstream ref/commit (resolved once; retries retain the immutable pin)'
         default: main
@@ -23,13 +43,52 @@ permissions:
 concurrency:
   group: catalog-production-sync
   cancel-in-progress: false
+env:
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  RELEASE_MODE: ${{ inputs.mode || 'sync_release' }}
+  GH_TOKEN: ${{ github.token }}
+  WRANGLER_SEND_METRICS: 'false'
+  NODE_OPTIONS: --max-old-space-size=6144
 
 jobs:
-  release:
+  validate:
+    # Always execute validation: a non-default branch/invalid mode must fail,
+    # not produce a successful run with every production job skipped.
+    runs-on: ubuntu-latest
+    outputs:
+      mode: ${{ steps.request.outputs.mode }}
+      source_run_id: ${{ steps.request.outputs.source_run_id }}
+      source_attempt: ${{ steps.request.outputs.source_attempt }}
+      expected_sync_id: ${{ steps.request.outputs.expected_sync_id }}
+      expected_plan_hash: ${{ steps.request.outputs.expected_plan_hash }}
+      expected_upstream_commit: ${{ steps.request.outputs.expected_upstream_commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - id: request
+        run: node scripts/catalog-publication.js validate
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ inputs.source_attempt }}
+          EXPECTED_SYNC_ID: ${{ inputs.expected_sync_id }}
+          EXPECTED_PLAN_HASH: ${{ inputs.expected_plan_hash }}
+          EXPECTED_UPSTREAM_COMMIT: ${{ inputs.expected_upstream_commit }}
+  sync:
+    needs: validate
     # Production credentials must only execute the reviewed default branch.
-    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: needs.validate.outputs.mode == 'sync_release' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      source_run_id: ${{ steps.sync.outputs.source_run_id }}
+      source_attempt: ${{ steps.sync.outputs.source_attempt }}
+      expected_sync_id: ${{ steps.sync.outputs.expected_sync_id }}
+      expected_plan_hash: ${{ steps.sync.outputs.expected_plan_hash }}
+      expected_upstream_commit: ${{ steps.sync.outputs.expected_upstream_commit }}
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
@@ -37,9 +96,6 @@ jobs:
       UPSTREAM_REF: ${{ inputs.upstream_ref || 'main' }}
       MAX_PRODUCTS: ${{ inputs.max_products || '10000' }}
       WRITE_BUDGET: ${{ inputs.write_budget || '2000000' }}
-      WRANGLER_SEND_METRICS: 'false'
-      GH_TOKEN: ${{ github.token }}
-      NODE_OPTIONS: --max-old-space-size=6144
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -88,16 +144,9 @@ jobs:
         if: steps.plan.outputs.upload_required == 'true'
         run: node scripts/catalog-plan-artifact.js confirm
       - name: Production sync and completion verification
+        id: sync
         if: success() && steps.plan.outputs.plan_ready == 'true' && (steps.plan_artifact.outputs.state == 'restored' || steps.plan_saved.outputs.state == 'saved')
         run: npm run release:sync
-      - name: Readiness, source integrity, Filter metadata, Golden, deploy and HTTP smoke
-        if: success() && steps.plan.outputs.plan_ready == 'true' && (steps.plan_artifact.outputs.state == 'restored' || steps.plan_saved.outputs.state == 'saved')
-        # One process holds the D1 writer-exclusion lease across ALL these
-        # phases. Shared Filter verification uses this same DB/lease before deploy;
-        # production smoke includes all 30 Filter endpoints. Named states also
-        # distinguish downstream not_run from failed. release-*.json captures
-        # source/filter/UX partial diagnostics even when a gate throws.
-        run: node scripts/catalog-release.js deploy
       - name: Release summary artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -113,4 +162,42 @@ jobs:
             .cache/upstream-categories.json
             .cache/inspection.json
             .cache/notices/
+          retention-days: 30
+  publish:
+    needs: [validate, sync]
+    # always() is essential: publish_existing intentionally skips sync. In
+    # normal mode only a successful sync job (including artifact upload) permits
+    # publication. A publish-only rerun retains these successful job outputs.
+    if: always() && needs.validate.result == 'success' && (needs.validate.outputs.mode == 'publish_existing' || needs.sync.result == 'success') && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_D1_DATABASE_ID: ${{ vars.CLOUDFLARE_D1_DATABASE_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      SYNC_JOB_RESULT: ${{ needs.sync.result }}
+      SOURCE_RUN_ID: ${{ needs.validate.outputs.source_run_id || needs.sync.outputs.source_run_id }}
+      SOURCE_ATTEMPT: ${{ needs.validate.outputs.source_attempt || needs.sync.outputs.source_attempt }}
+      EXPECTED_SYNC_ID: ${{ needs.validate.outputs.expected_sync_id || needs.sync.outputs.expected_sync_id }}
+      EXPECTED_PLAN_HASH: ${{ needs.validate.outputs.expected_plan_hash || needs.sync.outputs.expected_plan_hash }}
+      EXPECTED_UPSTREAM_COMMIT: ${{ needs.validate.outputs.expected_upstream_commit || needs.sync.outputs.expected_upstream_commit }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Local tests and schema generator
+        run: npm run check
+      - name: Restore completed sync, validate and publish under one release lease
+        run: node scripts/catalog-publication.js publish
+      - name: Publication diagnostics (including interrupted phases)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-publication-attempt-${{ github.run_attempt }}
+          include-hidden-files: true
+          if-no-files-found: error
+          path: .cache/release-*.json
           retention-days: 30

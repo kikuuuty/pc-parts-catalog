@@ -20,6 +20,82 @@ mean the release gate passed.
 
 ## Pipeline
 
+### Separate sync and publication jobs
+
+The production workflow validates the request, runs `sync` (60 minutes), then
+`publish` (120 minutes). Publication has its own clock; 120 minutes is a limit,
+not a completion guarantee. Both modes share `catalog-production-sync` with
+`cancel-in-progress: false`, default-branch restrictions and read-only Actions
+permissions. Validation always executes and rejects invalid branches/modes/inputs,
+so all production jobs being skipped is not a successful no-op release.
+
+`workflow_dispatch.mode` defaults to `sync_release`; scheduled runs always use
+that mode. Its existing upstream/product/write inputs, immutable pin, plan upload,
+partial retries and deletion guards are unchanged. Partial/failed sync blocks
+publication. The successful sync step emits **its own** run ID, attempt, sync ID,
+commit and plan hash as job outputs. Publication-only retries restore that exact
+completion artifact; they do not infer its attempt from the new `run_attempt`.
+
+`publish_existing` performs **no fetch/sync, migration, plan creation, normalization,
+product/raw/spec/identifier/FTS write or sync-history write**. It requires all five
+inputs before production access:
+
+|Input|Meaning|
+|---|---|
+|`source_run_id`|Original production sync workflow run in this repository|
+|`source_attempt`|Attempt whose sync step completed successfully|
+|`expected_sync_id`|Exact completed sync UUID|
+|`expected_plan_hash`|Immutable application plan SHA-256|
+|`expected_upstream_commit`|Fixed BuildCores commit SHA|
+
+`upstream_ref`, `max_products`, `write_budget` are unused in this mode. For example:
+
+```sh
+gh workflow run sync.yml -R kikuuuty/pc-parts-catalog --ref main \
+  -f mode=publish_existing -f source_run_id=<original-run> -f source_attempt=<sync-attempt> \
+  -f expected_sync_id=<sync-uuid> -f expected_plan_hash=<sha256> \
+  -f expected_upstream_commit=<buildcores-sha>
+```
+
+The original overall run can be cancelled/failed (for example, after sync on a
+timeout). Its repository, workflow ID/path, default branch, head SHA, exact
+attempt and successful sync step are authenticated via GitHub. The pin, plan and
+`catalog-release-attempt-<source_attempt>` are enumerated without fallback and
+downloaded into distinct directories. Missing/expired/ambiguous/changed artifacts,
+download/JSON errors, hash/format/contract/normalizer mismatches, and inconsistent
+completion/snapshot/receipt identities all stop before deployment. Nothing is
+regenerated from the DB. Both copies of the pin/plan must agree.
+
+Original `pin.run_id` / `plan.workflow_run_id` remain original. Source run/attempt/
+code SHA and publication run/code SHA are separately recorded; no GitHub execution
+environment is impersonated and the same-run ingestion checks are not relaxed.
+
+Both modes invoke `scripts/catalog-publication.js publish` and the shared
+`publishCatalog` operation. Under one existing release lease it checks live Worker
+DB/rate-limit bindings, the exact latest complete sync and **all fixed plan rows**
+(including inactive/local data), then runs readiness/FTS/typed integrity, Source,
+all 30 Filter categories, full search/performance/query-plan gates, configuration
+compile, tag/version-reconciled deployment and full production HTTP/Golden.
+`CATALOG_CACHE_EPOCH` still derives from the completed sync. A newer sync, even
+with equal counts/commit, fails closed. Only the existing lease SQL may write.
+
+Every invocation reruns its gates; timing reports are diagnostics, not checkpoints
+or permission to skip validation. `release-publish-report.json` includes phase
+start/end/elapsed times, source/publication identities, SQL cost metadata, live
+version/tag/epoch and HTTP status. A 30-second diagnostic heartbeat and best-effort
+signal handler preserve partial phases on cancellation; abrupt runner termination
+can still prevent a final report. No manual lease deletion is needed: wait for
+expiry and use the normal acquisition protocol.
+
+If publication fails, classify the error, confirm the same target/plan, unchanged
+DB, free/expired lease, credentials and budget, then rerun **the new publication
+run's failed job** with `gh run rerun <publication-run> --failed`. Do not rerun the
+old sync run to pick up code changes, resync products, or dispatch an unrelated
+plan. A lost deploy response is reconciled against the live tag on retry, not
+blindly redeployed. HTTP failure after deployment remains an unfinished release.
+The next scheduled update remains an ordinary `sync_release`, using the saved
+original complete plan through `sync_runs.report_json.artifact_run_id`.
+
 `.github/workflows/sync.yml` retains weekly Monday 03:17 UTC and manual dispatch.
 `catalog-production-sync` concurrency serializes the whole release without
 cancelling an active writer. Production credentials execute only the reviewed

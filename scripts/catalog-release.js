@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import { parseArgs } from 'node:util';
-import { mkdir, readFile, writeFile, appendFile, unlink } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, writeFile, appendFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fetchUpstream, loadSnapshot } from '../src/upstream.js';
 import { openDatabase } from '../src/database.js';
 import { syncSnapshot } from '../src/sync.js';
 import { catalogState } from '../src/quality/catalog.js';
-import { productionConfig, migrationGate, readiness, searchGate, safeDatabase, withReleaseLease, releaseIdentity } from './lib/release-gates.js';
-import { cloudflareRelease, assertDeployedVars, wrangler } from './lib/cloudflare-release.js';
-import { verifyProduction } from './lib/production-smoke.js';
+import { productionConfig, migrationGate, readiness, safeDatabase } from './lib/release-gates.js';
+import { cloudflareRelease } from './lib/cloudflare-release.js';
+import { publishCatalog } from './lib/catalog-publication.js';
+import { phaseTiming, diagnosticHeartbeat } from './lib/phase-timing.js';
 import { saveValidationReport } from './lib/validation-report.js';
-import { readPlan, planForSync, publishedSnapshot, latestSync, savePlan, PLAN_DIRECTORY } from '../src/application-plan.js';
+import { readPlan, planForSync, latestSync, savePlan, PLAN_DIRECTORY } from '../src/application-plan.js';
 import path from 'node:path';
 import { assertReleasePin, prepareReleasePlan, assertSavedPlan, loadReleaseSnapshot } from './lib/plan-artifact.js';
 
@@ -32,7 +32,14 @@ const positive = (value, fallback) => {
   const n = Number(value ?? fallback);
   assert(Number.isSafeInteger(n) && n > 0, 'Budget must be a positive integer'); return n;
 };
-const stage = value => { report.phase = value; console.log(`Release phase: ${value}`); };
+const timing = phaseTiming(report, () => saveValidationReport(output, report));
+let currentStage;
+const stage = value => {
+  if (currentStage) timing.mark(currentStage, 'passed');
+  currentStage = value; timing.mark(value, 'running');
+  report.phase = value; console.log(`Release phase: ${value}`);
+};
+let stopDiagnostics;
 async function baselineEvidence(db) {
   const base = await latestSync(db);
   if (!base || base.status !== 'complete') return {};
@@ -131,88 +138,19 @@ async function sync(db, prepareOnly = false) {
   const ready = await readiness(db, { commit: pinned.commit, expectedCounts: counts });
   Object.assign(report, { active: ready.active, completed_at: ready.sync.finished_at, cache_epoch: ready.cache_epoch });
   await writeFile('.cache/release-snapshot.json', JSON.stringify({ sync_id: ready.sync.id, commit: pinned.commit, plan_hash: result.plan_hash, counts }) + '\n');
+  if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT,
+    `source_run_id=${runId}\nsource_attempt=${process.env.GITHUB_RUN_ATTEMPT}\nexpected_sync_id=${ready.sync.id}\nexpected_plan_hash=${result.plan_hash}\nexpected_upstream_commit=${pinned.commit}\n`);
 }
 
 async function release(db, config, deploy) {
-  const operation = async (locked, renew = async () => {}) => {
-    stage('readiness / integrity');
-    let expected;
-    // Workflow deploy must match the sync step, even if another operator has
-    // synchronized between jobs. Manual deploy operates on the latest complete.
-    if (deploy && process.env.GITHUB_ACTIONS === 'true') expected = JSON.parse(await readFile('.cache/release-snapshot.json', 'utf8'));
-    const ready = await readiness(locked, { commit: expected?.commit, expectedCounts: expected?.counts });
-    if (expected) assert.equal(ready.sync.id, expected.sync_id, 'Completed sync changed before release');
-    const snapshot = publishedSnapshot(await planForSync(ready.sync));
-    if (expected) assert.equal(snapshot.applicationPlan.hash, expected.plan_hash, 'Release plan changed');
-    Object.assign(report, { sync_id: ready.sync.id, snapshot_commit: ready.sync.source_commit, active: ready.active, completed_at: ready.sync.finished_at, cache_epoch: ready.cache_epoch,fts_integrity:ready.fts.pass });
-    const checks = await searchGate(locked,{snapshot, representative:args.representative, onPhase(name, state) {
-      report.validation[name] = state;
-      if (state === 'running') stage(name);
-      if (name === 'search_quality' && state === 'failed') report.golden = 'failed';
-      if (name === 'search_quality' && state === 'passed') report.golden = 'passed';
-    }});
-    Object.assign(report, { ...checks, validation: { ...report.validation, ...checks.validation } });
-    await renew();
-    const confirm = await readiness(locked, { commit: ready.sync.source_commit, expectedCounts: ready.counts });
-    assert.equal(confirm.sync.id, ready.sync.id);
-    if(args.local) { report.deploy='not run (local read-only verification)';return; }
-    stage('compile deploy configuration');
-    const vars = { ...config.vars, CATALOG_CACHE_EPOCH: ready.cache_epoch };
-    // Root-level temporary config preserves ALL relative path semantics. Every
-    // production var/binding stays present; local env can never be selected.
-    const generated = { ...config, vars };
-    delete generated.env;
-    const file = `.catalog-release-${randomUUID()}.json`;
-    await writeFile(file, JSON.stringify(generated, null, 2));
-    try {
-      await wrangler(['deploy', '--config', file, '--env', '', '--dry-run']);
-      if (!deploy) { report.deploy = 'dry-run passed'; return; }
-      const api = await cloudflareRelease(config);
-      const tag = await releaseIdentity(config, ready.cache_epoch);
-      const before = await api.current();
-      report.previous_worker_version = before.id;
-      // Dashboard-only vars would otherwise be deleted by Wrangler. Require
-      // them to be declared before proceeding, rather than silently losing them.
-      assert(before.bindings.filter(b => ['plain_text', 'json'].includes(b.type)).every(b => Object.hasOwn(vars, b.name)), 'Undeclared production vars; reconcile configuration');
-      await renew();
-      stage('Worker deploy');
-      if (before.tag === tag) {
-        assertDeployedVars(before, vars);
-        report.deploy = 'already deployed';
-        report.worker_version = before.id;
-      } else {
-        report.deploy = 'submitted (outcome may be unknown on transport failure)';
-        // No blind write retry. On rerun the live tag reconciles a lost response.
-        const text = await wrangler(['deploy', '--config', file, '--env', '', '--tag', tag, '--message', 'Verified catalog snapshot release']);
-        const version = text.match(/Current Version ID:\s*([a-f0-9-]{36})/i)?.[1];
-        const current = await api.current();
-        assert.equal(current.tag, tag, 'Active release tag differs');
-        if (version) assert.equal(current.id, version, 'Concurrent Worker deployment');
-        assertDeployedVars(current, vars);
-        report.worker_version = current.id;
-        report.deploy = 'success';
-      }
-      stage('production smoke / contract / Golden');
-      report.post_deploy = 'running';
-      report.verification = {};
-      await verifyProduction(locked, 'https://pc-parts-catalog.kikuuuty.workers.dev', {snapshot, golden:!args.representative, report: report.verification});
-      if(args.representative) {
-        stage('production read-only release verification');
-        report.release_validation = await searchGate(locked,{representative:true,output:'.cache/transition-production-gate.json'});
-      }
-      await renew();
-      const after = await api.current();
-      assert.equal(after.id, report.worker_version, 'Worker changed during verification');
-      assertDeployedVars(after, vars);
-      report.post_deploy = 'pass';
-    } finally { await unlink(file); }
-  };
-  if (deploy) await withReleaseLease(db, operation);
-  else await operation(db);
+  assert(!deploy || process.env.GITHUB_ACTIONS !== 'true', 'Use authenticated publication CLI in Actions');
+  return publishCatalog({ db, config, deploy, local: args.local, representative: args.representative, report, timing,
+    stage(value) { report.phase = value; console.log(`Release phase: ${value}`); } });
 }
 
 try {
   await mkdir('.cache', { recursive: true });
+  stopDiagnostics = diagnosticHeartbeat(report, timing, output);
   if (command === 'pin') await pin();
   else {
     // Generator check is cheap; npm test is run once by the workflow or npm
@@ -240,6 +178,8 @@ try {
   console.error(`Release stopped at: ${report.phase}. See docs/catalog-release.md for recovery. Provider errors and SQL are intentionally not logged.`);
   process.exitCode = 1;
 } finally {
+  if (currentStage) timing.mark(currentStage, report.result === 'success' ? 'passed' : 'failed');
+  if (stopDiagnostics) { try { await stopDiagnostics(); } catch (error) { if (!originalFailure) throw error; } }
   await saveValidationReport(output, report, originalFailure);
   console.log(JSON.stringify(report));
   if (process.env.GITHUB_STEP_SUMMARY) {
